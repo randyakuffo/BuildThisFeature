@@ -1,0 +1,697 @@
+You are a senior Staff Software Engineer and Senior Product Designer.
+
+You are continuing an existing production application called InboxOS.
+
+Do not redesign the app from scratch.
+
+Preserve:
+
+Google OAuth
+Gmail Sync
+Supabase
+Edge Functions
+Groq AI
+Gemini AI
+Current dashboard
+Current navigation
+Current UI theme
+Current authentication
+Current database
+Current APIs
+
+Do NOT remove or replace existing functionality.
+
+Your goal is to COMPLETE Phase 1.
+
+PRODUCT VISION
+
+InboxOS is NOT another email client.
+
+InboxOS is an AI Command Center that tells people:
+
+What deserves attention
+What can wait
+What they promised
+Who is waiting
+What should happen next
+
+Every screen should reduce decisions.
+
+Never overwhelm the user.
+
+COMPLETE THESE MODULES
+1. Dashboard (Executive Brief)
+
+Replace simple metrics with an executive summary.
+
+Every sync should generate:
+
+Today's Focus
+
+Show only 3-5 priorities.
+
+Example:
+
+• CEO waiting on approval
+
+• Invoice due tomorrow
+
+• Contract awaiting signature
+
+• Meeting at 2 PM needs preparation
+
+• HR requested documents
+
+These should be ranked using AI priority.
+
+Work Health Score
+
+Create a score from 0-100.
+
+Factors:
+
+Unread important emails
+
+Overdue promises
+
+Overdue follow-ups
+
+Outstanding bills
+
+Waiting threads
+
+Calendar conflicts
+
+Response latency
+
+Display:
+
+92
+
+Excellent
+
+or
+
+68
+
+Needs Attention
+
+AI Summary
+
+Every sync create:
+
+Morning Brief
+
+Afternoon Update
+
+End of Day Summary
+
+Example:
+
+You have responded to 14 emails.
+
+Two customers still need replies.
+
+One invoice is due tomorrow.
+
+Your afternoon meeting has 5 unread related emails.
+
+2. Inbox Intelligence
+
+Improve every email.
+
+Each email receives:
+
+Priority
+
+High
+
+Medium
+
+Low
+
+Urgency Score
+
+0-100
+
+Confidence
+
+0-100
+
+Requires Reply
+
+Yes/No
+
+Estimated Reply Time
+
+30 sec
+
+2 min
+
+5 min
+
+Suggested Action
+
+Reply
+
+Archive
+
+Delegate
+
+Schedule
+
+Wait
+
+Ignore
+
+AI Summary
+
+Action Items
+
+Due Date
+
+People Mentioned
+
+Company Mentioned
+
+Topics
+
+3. Action Center
+
+This becomes a real task manager.
+
+Automatically generate tasks from emails.
+
+Every task contains
+
+Source Email
+
+Due Date
+
+Priority
+
+Status
+
+Owner
+
+Estimated Time
+
+Completion Checkbox
+
+Allow
+
+Complete
+
+Snooze
+
+Convert to Calendar
+
+Open Email
+
+Mark Waiting
+
+Generate Reply
+
+Group tasks into
+
+Urgent
+
+Today
+
+This Week
+
+Later
+
+4. Waiting On
+
+Track conversations.
+
+Not just emails.
+
+Determine
+
+Who owes you
+
+How long
+
+Expected response
+
+Last message
+
+Suggested follow-up
+
+Display
+
+Waiting On
+
+John Smith
+
+Proposal
+
+3 Days
+
+Suggested Action
+
+Follow Up
+
+Add automatic stale detection.
+
+If no reply after configurable days
+
+Recommend follow-up.
+
+5. Follow Ups
+
+AI should detect:
+
+"I'll send..."
+
+"I'll review..."
+
+"I'll get back..."
+
+"I'll approve..."
+
+Track promises.
+
+Display
+
+Promise
+
+Made
+
+Due
+
+Completed
+
+Overdue
+
+Allow
+
+Mark Complete
+
+Delay
+
+Send Reminder
+
+Generate Follow-up Email
+
+6. Bills & Subscriptions
+
+Detect
+
+Invoices
+
+Bills
+
+Receipts
+
+Renewals
+
+Subscriptions
+
+For every bill show
+
+Vendor
+
+Amount
+
+Due Date
+
+Category
+
+Status
+
+Paid
+
+Unpaid
+
+Recurring
+
+Provide
+
+Upcoming Payments
+
+Overdue
+
+Monthly Spend
+
+Subscription Cost
+
+Renewal Timeline
+
+7. Calendar Intelligence
+
+Don't simply display events.
+
+Prepare users.
+
+For each meeting show
+
+Related emails
+
+Related files
+
+People attending
+
+Open action items
+
+Unanswered questions
+
+Suggested agenda
+
+Estimated preparation time
+
+Allow
+
+Open Related Emails
+
+Generate Meeting Notes
+
+Generate Questions
+
+Skip Meeting Recommendation
+
+If AI determines user is optional.
+
+8. AI Assistant
+
+Upgrade into a Work Copilot.
+
+Allow natural questions like
+
+What should I work on?
+
+Summarize yesterday.
+
+Who is waiting on me?
+
+Which invoices are overdue?
+
+Which emails need replies?
+
+Show everything from Microsoft.
+
+Prepare me for today's meetings.
+
+Summarize Project Phoenix.
+
+What promises have I made?
+
+Generate follow-up for Acme.
+
+Never hallucinate.
+
+Only answer from connected data.
+
+9. Search
+
+Global AI Search
+
+Search
+
+Emails
+
+Calendar
+
+Bills
+
+Attachments
+
+Tasks
+
+People
+
+Companies
+
+Topics
+
+Natural language
+
+Examples
+
+Invoices from Microsoft
+
+Unread HR emails
+
+Travel receipts
+
+Meetings with Finance
+
+Contracts awaiting signature
+
+10. Analytics
+
+Add dashboard analytics.
+
+Response Time
+
+Emails Processed
+
+Tasks Completed
+
+Follow-ups Sent
+
+Bills Paid
+
+Meetings Prepared
+
+Average Inbox Health
+
+Weekly Trend
+
+Monthly Trend
+
+11. Automation Suggestions
+
+After every sync
+
+Analyze repetitive work.
+
+Suggest automations.
+
+Examples
+
+You archive newsletters daily.
+
+Automate?
+
+You forward invoices.
+
+Automate?
+
+You schedule meetings after proposals.
+
+Automate?
+
+Never perform automatically.
+
+Always ask first.
+
+12. AI Priority Engine
+
+Replace simple importance.
+
+Every email receives
+
+Business Impact
+
+Urgency
+
+Financial Risk
+
+Relationship Risk
+
+Deadline Risk
+
+AI Confidence
+
+Overall Score
+
+Sort inbox using this score.
+
+13. Relationship Intelligence
+
+Clicking a sender should display
+
+Relationship Timeline
+
+Last Contact
+
+Average Response Time
+
+Pending Requests
+
+Open Tasks
+
+Recent Meetings
+
+Recent Attachments
+
+Conversation Sentiment
+
+14. Daily Timeline
+
+Generate
+
+Morning
+
+Afternoon
+
+Evening
+
+Timeline
+
+Showing
+
+Meetings
+
+Emails
+
+Tasks
+
+Bills
+
+Major Events
+
+Allow replay of the workday.
+
+15. Sync Improvements
+
+Every Gmail sync should
+
+Download new emails
+
+Update changed threads
+
+Recompute priorities
+
+Recompute tasks
+
+Recompute waiting list
+
+Recompute follow-ups
+
+Recompute bills
+
+Recompute subscriptions
+
+Recompute calendar intelligence
+
+Refresh dashboard
+
+Avoid duplicate processing.
+
+AI REQUIREMENTS
+
+Gemini
+
+Use for
+
+Summaries
+
+Reasoning
+
+Meeting prep
+
+Daily brief
+
+Work health
+
+Groq
+
+Use for
+
+Fast classification
+
+Categorization
+
+Priority
+
+Task extraction
+
+Waiting detection
+
+Follow-up detection
+
+Bills
+
+Always validate responses.
+
+Never trust raw AI output.
+
+Normalize every response.
+
+PERFORMANCE
+
+Do not process every email every sync.
+
+Only process
+
+New emails
+
+Modified emails
+
+Changed threads
+
+Cache AI results.
+
+Store structured output in Supabase.
+
+Reuse cached AI whenever possible.
+
+UI
+
+Keep the existing design language.
+
+Improve spacing.
+
+Improve loading states.
+
+Improve empty states.
+
+Add skeleton loaders.
+
+Add optimistic updates.
+
+Animations should be subtle.
+
+SUCCESS CRITERIA
+
+When a user opens InboxOS in the morning they should immediately know:
+
+What deserves attention.
+
+What they owe people.
+
+Who owes them.
+
+What meetings require preparation.
+
+Which bills need attention.
+
+What promises are due.
+
+What should happen next.
+
+Without opening Gmail.
+
+IMPORTANT
+
+Do not rewrite working authentication.
+
+Do not replace Supabase.
+
+Do not remove Gmail integration.
+
+Do not remove Groq.
+
+Do not remove Gemini.
+
+Do not redesign navigation.
+
+Do not remove existing features.
+
+Only extend the current architecture.
+
+Keep all existing APIs compatible.

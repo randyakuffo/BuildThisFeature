@@ -3,15 +3,15 @@ import {
   LayoutDashboard, Inbox, Bot, CheckSquare, Clock, Users, Calendar,
   CreditCard, Package, Paperclip, Search, Zap, Shield, BarChart2,
   Settings, Bell, ChevronLeft, ChevronRight, Moon, Sun, Sparkles,
-  TrendingUp, TrendingDown, ArrowRight, Mail, Star, AlertTriangle,
+  TrendingUp, ArrowRight, Mail, Star, AlertTriangle,
   RefreshCw, MoreHorizontal, Send, Plus, MessageSquare, Archive,
   Check, Reply, FileText, Image, DollarSign, Activity, Lock,
   ShieldAlert, Eye, User, Globe, X, ChevronDown, Filter,
-  LogOut, RotateCcw, ExternalLink, Copy, Plane, ShoppingCart,
-  CheckCircle2, Circle, Building
+  LogOut, RotateCcw,
+  CheckCircle2, Circle
 } from "lucide-react";
 import {
-  AreaChart, Area, BarChart, Bar, LineChart, Line,
+  BarChart, Bar,
   XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
 } from "recharts";
 import {
@@ -219,6 +219,86 @@ const colorMap: Record<string, { bg: string; icon: string; stroke: string }> = {
   emerald: { bg: "bg-emerald-50 dark:bg-emerald-950/40",icon: "text-emerald-600 dark:text-emerald-400",stroke: "#10B981" },
   slate:   { bg: "bg-slate-100 dark:bg-slate-800/40",   icon: "text-slate-600 dark:text-slate-400",    stroke: "#64748B" },
 };
+
+// ─── AI HELPERS ──────────────────────────────────────────────────────────────
+
+function computeWorkHealthScore(
+  emails: GmailEmail[],
+  insights: Insights,
+  _stats: Stats
+): { score: number; label: string; color: string; ringColor: string; bgColor: string } {
+  let score = 100;
+  const secArr = Array.isArray(insights.security) ? insights.security : [];
+  const billArr = Array.isArray(insights.bills) ? insights.bills : [];
+  const fupArr = Array.isArray(insights.followUps) ? insights.followUps : [];
+  const waitArr = Array.isArray(insights.waitingOn) ? insights.waitingOn : [];
+  const actArr = Array.isArray(insights.actionItems) ? insights.actionItems : [];
+
+  score -= emails.filter(e => !e.isRead && e.isImportant).length * 3;
+  score -= secArr.filter((a: any) => a.severity === "high").length * 15;
+  score -= secArr.filter((a: any) => a.severity === "medium").length * 5;
+  score -= billArr.filter((b: any) => b.status === "overdue").length * 10;
+  score -= billArr.filter((b: any) => b.status === "due_soon").length * 4;
+  score -= fupArr.filter((f: any) => f.status === "overdue").length * 7;
+  score -= waitArr.filter((w: any) => (w.days || 0) > 5).length * 3;
+  score -= actArr.filter((a: any) => a.priority === "High").length * 2;
+  score = Math.max(0, Math.min(100, Math.round(score)));
+
+  if (score >= 85) return { score, label: "Excellent",       color: "text-emerald-600 dark:text-emerald-400", ringColor: "#10B981", bgColor: "bg-emerald-50 dark:bg-emerald-950/30" };
+  if (score >= 70) return { score, label: "Good",            color: "text-sky-600 dark:text-sky-400",         ringColor: "#0EA5E9", bgColor: "bg-sky-50 dark:bg-sky-950/30" };
+  if (score >= 50) return { score, label: "Needs Attention", color: "text-amber-600 dark:text-amber-400",     ringColor: "#F59E0B", bgColor: "bg-amber-50 dark:bg-amber-950/30" };
+  return                 { score, label: "Critical",         color: "text-red-600 dark:text-red-400",         ringColor: "#EF4444", bgColor: "bg-red-50 dark:bg-red-950/30" };
+}
+
+interface FocusItem { text: string; priority: "high" | "medium" | "low"; type: string; }
+
+function getTodaysFocus(emails: GmailEmail[], insights: Insights): FocusItem[] {
+  type Scored = FocusItem & { score: number };
+  const items: Scored[] = [];
+
+  (Array.isArray(insights.security) ? insights.security : []).filter((a: any) => a.severity === "high").forEach((a: any) => {
+    items.push({ text: `Security alert: ${a.type} from ${a.from}`, priority: "high", type: "security", score: 100 });
+  });
+  (Array.isArray(insights.bills) ? insights.bills : []).filter((b: any) => b.status === "overdue").forEach((b: any) => {
+    items.push({ text: `Overdue: ${b.name}${b.amount ? ` — $${Number(b.amount).toFixed(0)}` : ""}`, priority: "high", type: "bill", score: 95 });
+  });
+  (Array.isArray(insights.followUps) ? insights.followUps : []).filter((f: any) => f.status === "overdue").slice(0, 2).forEach((f: any) => {
+    items.push({ text: `Overdue promise to ${f.person}: "${f.text}"`, priority: "high", type: "followup", score: 90 });
+  });
+  (Array.isArray(insights.actionItems) ? insights.actionItems : []).filter((a: any) => a.priority === "High").slice(0, 2).forEach((a: any) => {
+    items.push({ text: a.text, priority: "high", type: "action", score: 85 });
+  });
+  emails.filter(e => e.priority === "High" && e.requiresReply && !e.isRead).slice(0, 2).forEach(e => {
+    items.push({ text: `Reply needed: "${e.subject}" from ${e.senderName}`, priority: "high", type: "reply", score: 80 });
+  });
+  (Array.isArray(insights.bills) ? insights.bills : []).filter((b: any) => b.status === "due_soon").slice(0, 1).forEach((b: any) => {
+    items.push({ text: `Bill due soon: ${b.name}${b.due ? ` on ${b.due}` : ""}`, priority: "medium", type: "bill", score: 72 });
+  });
+  (Array.isArray(insights.waitingOn) ? insights.waitingOn : []).filter((w: any) => (w.days || 0) > 5).slice(0, 1).forEach((w: any) => {
+    items.push({ text: `${w.person} hasn't replied in ${w.days} days`, priority: "medium", type: "waiting", score: 65 });
+  });
+  (Array.isArray(insights.calendar) ? insights.calendar : []).slice(0, 1).forEach((c: any) => {
+    items.push({ text: `Meeting: ${c.title}${c.time ? ` at ${c.time}` : ""}`, priority: "low", type: "calendar", score: 60 });
+  });
+  return items.sort((a, b) => b.score - a.score).slice(0, 5).map(({ score: _s, ...rest }) => rest);
+}
+
+function getEstimatedReplyTime(email: GmailEmail): string {
+  if (!email.requiresReply) return "";
+  const len = (email.snippet || "").length + (email.actionItems || []).length * 50;
+  if (len > 500) return "~5 min";
+  if (len > 200) return "~2 min";
+  return "~30 sec";
+}
+
+function getSuggestedAction(email: GmailEmail): string {
+  if (email.status === "Needs Reply") return "Reply";
+  if (email.status === "Action Required") return "Act";
+  if (email.status === "Waiting") return "Wait";
+  if (email.status === "No Action" || email.category === "Newsletter") return "Archive";
+  if (email.priority === "Low") return "Archive";
+  return "Review";
+}
 
 // ─── LOGIN SCREEN ─────────────────────────────────────────────────────────────
 
@@ -562,24 +642,24 @@ function DashboardView({
   const today = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
   const firstName = (user?.user_metadata?.name || "").split(" ")[0] || "there";
 
-  const mkSpark = (vals: number[]) => vals.map((v) => ({ v }));
-
-  const kpiCards = [
-    { label: "Unread Emails", value: String(stats.unread || 0), icon: Mail, color: "indigo", spark: mkSpark([0, stats.unread || 0]) },
-    { label: "Needs Attention", value: String(stats.important || 0), icon: Star, color: "amber", spark: mkSpark([0, stats.important || 0]) },
-    { label: "Action Items", value: String(insights.actionItems.length), icon: CheckSquare, color: "violet", spark: mkSpark([0, insights.actionItems.length]) },
-    { label: "Waiting On", value: String(insights.waitingOn.length), icon: Clock, color: "sky", spark: mkSpark([0, insights.waitingOn.length]) },
-    { label: "Bills Detected", value: String(insights.bills.length), icon: CreditCard, color: "red", spark: mkSpark([0, insights.bills.length]) },
-    { label: "Follow Ups", value: String(insights.followUps.length), icon: Users, color: "emerald", spark: mkSpark([0, insights.followUps.length]) },
-    { label: "Total in Inbox", value: String(stats.total || 0), icon: Inbox, color: "slate", spark: mkSpark([0, stats.total || 0]) },
-    { label: "Security Alerts", value: String(insights.security.length), icon: AlertTriangle, color: "red", spark: mkSpark([0, insights.security.length]) },
-    { label: "Calendar Events", value: String(insights.calendar.length), icon: Calendar, color: "sky", spark: mkSpark([0, insights.calendar.length]) },
-    { label: "Purchases", value: String(insights.purchases.length), icon: Package, color: "violet", spark: mkSpark([0, insights.purchases.length]) },
-    { label: "Newsletters", value: String(stats.byCategory?.["Newsletters"] || 0), icon: Globe, color: "slate", spark: mkSpark([0, stats.byCategory?.["Newsletters"] || 0]) },
-    { label: "Work Emails", value: String(stats.byCategory?.["Work"] || 0), icon: Building, color: "indigo", spark: mkSpark([0, stats.byCategory?.["Work"] || 0]) },
-  ];
-
   const topEmails = emails.slice(0, 5);
+  const health = computeWorkHealthScore(emails, insights, stats);
+  const focus = getTodaysFocus(emails, insights);
+
+  const focusPriorityStyle = (p: string) =>
+    p === "high" ? "bg-red-50 dark:bg-red-950/30 border-l-2 border-red-400" :
+    p === "medium" ? "bg-amber-50 dark:bg-amber-950/30 border-l-2 border-amber-400" :
+    "bg-gray-50 dark:bg-[#1E2235] border-l-2 border-gray-200 dark:border-slate-700";
+
+  const focusTypeIcon = (type: string) => {
+    if (type === "security") return <AlertTriangle className="w-3.5 h-3.5 text-red-500 flex-shrink-0" />;
+    if (type === "bill") return <CreditCard className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" />;
+    if (type === "reply") return <Reply className="w-3.5 h-3.5 text-indigo-500 flex-shrink-0" />;
+    if (type === "action") return <CheckSquare className="w-3.5 h-3.5 text-violet-500 flex-shrink-0" />;
+    if (type === "followup") return <Users className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0" />;
+    if (type === "waiting") return <Clock className="w-3.5 h-3.5 text-sky-500 flex-shrink-0" />;
+    return <Calendar className="w-3.5 h-3.5 text-slate-500 flex-shrink-0" />;
+  };
 
   return (
     <div className="p-6 max-w-[1400px] mx-auto">
@@ -588,10 +668,10 @@ function DashboardView({
         <div className="flex-1">
           <p className="text-xs font-medium text-indigo-600 dark:text-indigo-400 uppercase tracking-widest mb-1">{today}</p>
           <h1 className="text-3xl font-extrabold text-gray-900 dark:text-white leading-tight" style={{ fontFamily: "'Plus Jakarta Sans',sans-serif" }}>
-            {greeting}, {firstName} 👋
+            {greeting}, {firstName}
           </h1>
           <p className="text-gray-500 dark:text-slate-400 mt-1.5 text-sm">
-            {syncing ? "Syncing your inbox…" : `Here's everything that needs your attention today.`}
+            {syncing ? "Syncing your inbox…" : "Here's your work command center."}
           </p>
           <div className="flex flex-wrap items-center gap-2 mt-4">
             {stats.unread > 0 && (
@@ -599,12 +679,17 @@ function DashboardView({
                 <Mail className="w-3 h-3" /> {stats.unread} unread
               </div>
             )}
-            {insights.security.length > 0 && (
+            {(Array.isArray(insights.security) ? insights.security : []).length > 0 && (
               <div className="flex items-center gap-1.5 text-xs bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 px-3 py-1.5 rounded-full font-medium">
                 <AlertTriangle className="w-3 h-3" /> {insights.security.length} security alert{insights.security.length !== 1 ? "s" : ""}
               </div>
             )}
-            {insights.bills.filter((b: any) => b.status === "overdue" || b.status === "due_soon").length > 0 && (
+            {(Array.isArray(insights.bills) ? insights.bills : []).filter((b: any) => b.status === "overdue").length > 0 && (
+              <div className="flex items-center gap-1.5 text-xs bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 px-3 py-1.5 rounded-full font-medium">
+                <CreditCard className="w-3 h-3" /> Bill overdue
+              </div>
+            )}
+            {(Array.isArray(insights.bills) ? insights.bills : []).filter((b: any) => b.status === "due_soon").length > 0 && (
               <div className="flex items-center gap-1.5 text-xs bg-amber-50 dark:bg-amber-950/30 text-amber-600 dark:text-amber-400 px-3 py-1.5 rounded-full font-medium">
                 <CreditCard className="w-3 h-3" /> Bill due soon
               </div>
@@ -618,7 +703,7 @@ function DashboardView({
             <div className="w-7 h-7 rounded-lg bg-white/20 flex items-center justify-center">
               <Sparkles className="w-4 h-4 text-white" />
             </div>
-            <span className="text-white font-semibold text-sm" style={{ fontFamily: "'Plus Jakarta Sans',sans-serif" }}>Ask AI anything</span>
+            <span className="text-white font-semibold text-sm" style={{ fontFamily: "'Plus Jakarta Sans',sans-serif" }}>Work Copilot</span>
             <span className="ml-auto flex items-center gap-1 text-[10px] text-white/60">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" /> Live
             </span>
@@ -628,7 +713,7 @@ function DashboardView({
             <span className="text-white/50 text-sm">What should I work on first?</span>
           </div>
           <div className="flex flex-wrap gap-1.5">
-            {["What needs replies?", "Summarize today", "Find invoices", "Show promises", "Security check"].map((p) => (
+            {["What needs replies?", "Summarize today", "Who owes me?", "Show promises", "Prepare for meetings"].map((p) => (
               <button key={p} onClick={() => setView("ai")} className="text-[11px] bg-white/10 hover:bg-white/20 text-white/80 hover:text-white px-2.5 py-1 rounded-lg transition-colors">
                 {p}
               </button>
@@ -637,35 +722,97 @@ function DashboardView({
         </Card>
       </div>
 
-      {/* KPI Grid */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3 mb-6">
-        {kpiCards.map((card) => {
-          const { bg, icon: iconCls, stroke } = colorMap[card.color] ?? colorMap.slate;
+      {/* Work Health Score + Today's Focus + 6-metric summary */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
+        {/* Work Health Score */}
+        <Card className="p-5 flex flex-col items-center justify-center text-center">
+          <p className="text-[11px] font-semibold text-gray-400 dark:text-slate-500 uppercase tracking-widest mb-4">Inbox Health Score</p>
+          <div className="relative w-28 h-28 mb-3">
+            <svg className="w-28 h-28 -rotate-90" viewBox="0 0 112 112">
+              <circle cx="56" cy="56" r="44" fill="none" stroke="currentColor" strokeWidth="8" className="text-gray-100 dark:text-slate-800" />
+              <circle
+                cx="56" cy="56" r="44" fill="none"
+                stroke={health.ringColor} strokeWidth="8"
+                strokeDasharray={`${2 * Math.PI * 44}`}
+                strokeDashoffset={`${2 * Math.PI * 44 * (1 - health.score / 100)}`}
+                strokeLinecap="round"
+                style={{ transition: "stroke-dashoffset 0.8s ease" }}
+              />
+            </svg>
+            <div className="absolute inset-0 flex flex-col items-center justify-center">
+              <span className="text-3xl font-extrabold text-gray-900 dark:text-white" style={{ fontFamily: "'Plus Jakarta Sans',sans-serif" }}>{health.score}</span>
+            </div>
+          </div>
+          <span className={`text-sm font-bold ${health.color}`}>{health.label}</span>
+          <p className="text-[11px] text-gray-400 dark:text-slate-500 mt-1">Based on {stats.total} emails</p>
+        </Card>
+
+        {/* Today's Focus */}
+        <Card className="lg:col-span-2 p-5">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-lg bg-violet-50 dark:bg-violet-950/40 flex items-center justify-center">
+                <Zap className="w-3.5 h-3.5 text-violet-600 dark:text-violet-400" />
+              </div>
+              <h3 className="font-semibold text-gray-900 dark:text-white text-sm" style={{ fontFamily: "'Plus Jakarta Sans',sans-serif" }}>Today's Focus</h3>
+              <span className="text-[10px] bg-violet-50 dark:bg-violet-950/30 text-violet-600 dark:text-violet-400 px-2 py-0.5 rounded-full font-medium">{focus.length} priorities</span>
+            </div>
+          </div>
+          {focus.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-6 text-center">
+              <CheckCircle2 className="w-8 h-8 text-emerald-400 mb-2" />
+              <p className="text-sm font-medium text-gray-700 dark:text-slate-300">All clear — no urgent priorities</p>
+              <p className="text-xs text-gray-400 dark:text-slate-500 mt-0.5">Sync your inbox to detect priorities</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {focus.map((item, i) => (
+                <div key={i} className={`flex items-center gap-3 px-3 py-2.5 rounded-xl ${focusPriorityStyle(item.priority)}`}>
+                  {focusTypeIcon(item.type)}
+                  <p className="text-xs text-gray-800 dark:text-slate-200 flex-1 leading-snug">{item.text}</p>
+                  {item.type === "reply" && (
+                    <button onClick={() => setView("inbox")} className="text-[10px] font-medium bg-indigo-600 text-white px-2.5 py-1 rounded-lg hover:bg-indigo-700 transition-colors flex-shrink-0">
+                      Open
+                    </button>
+                  )}
+                  {item.type === "action" && (
+                    <button onClick={() => setView("action")} className="text-[10px] font-medium bg-violet-600 text-white px-2.5 py-1 rounded-lg hover:bg-violet-700 transition-colors flex-shrink-0">
+                      View
+                    </button>
+                  )}
+                  {item.type === "bill" && (
+                    <button onClick={() => setView("bills")} className="text-[10px] font-medium bg-amber-600 text-white px-2.5 py-1 rounded-lg hover:bg-amber-700 transition-colors flex-shrink-0">
+                      View
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+      </div>
+
+      {/* 6-metric summary row */}
+      <div className="grid grid-cols-3 sm:grid-cols-6 gap-3 mb-6">
+        {[
+          { label: "Unread", value: stats.unread || 0, icon: Mail, color: "indigo", onClick: () => setView("inbox") },
+          { label: "Action Items", value: (Array.isArray(insights.actionItems) ? insights.actionItems : []).length, icon: CheckSquare, color: "violet", onClick: () => setView("action") },
+          { label: "Waiting On", value: (Array.isArray(insights.waitingOn) ? insights.waitingOn : []).length, icon: Clock, color: "sky", onClick: () => setView("waiting") },
+          { label: "Bills", value: (Array.isArray(insights.bills) ? insights.bills : []).length, icon: CreditCard, color: "red", onClick: () => setView("bills") },
+          { label: "Follow Ups", value: (Array.isArray(insights.followUps) ? insights.followUps : []).length, icon: Users, color: "emerald", onClick: () => setView("followup") },
+          { label: "Security", value: (Array.isArray(insights.security) ? insights.security : []).length, icon: AlertTriangle, color: "red", onClick: () => setView("security") },
+        ].map((card) => {
+          const { bg, icon: iconCls } = colorMap[card.color] ?? colorMap.slate;
           const Icon = card.icon;
           return (
-            <Card key={card.label} className="p-4 hover:shadow-md transition-shadow cursor-pointer">
-              <div className="flex items-center justify-between mb-2.5">
-                <div className={`w-8 h-8 rounded-xl ${bg} flex items-center justify-center`}>
-                  <Icon className={`w-4 h-4 ${iconCls}`} />
-                </div>
+            <Card key={card.label} className="p-4 hover:shadow-md transition-shadow cursor-pointer" onClick={card.onClick}>
+              <div className={`w-8 h-8 rounded-xl ${bg} flex items-center justify-center mb-2.5`}>
+                <Icon className={`w-4 h-4 ${iconCls}`} />
               </div>
               <div className="text-2xl font-bold text-gray-900 dark:text-white mb-0.5" style={{ fontFamily: "'Plus Jakarta Sans',sans-serif" }}>
                 {card.value}
               </div>
-              <p className="text-[11px] text-gray-500 dark:text-slate-400 mb-2 leading-tight">{card.label}</p>
-              <div className="h-7">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={card.spark}>
-                    <defs>
-                      <linearGradient id={`g-${card.label}`} x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor={stroke} stopOpacity={0.3} />
-                        <stop offset="95%" stopColor={stroke} stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <Area type="monotone" dataKey="v" stroke={stroke} fill={`url(#g-${card.label})`} strokeWidth={1.5} dot={false} />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
+              <p className="text-[11px] text-gray-500 dark:text-slate-400 leading-tight">{card.label}</p>
             </Card>
           );
         })}
@@ -938,15 +1085,55 @@ function InboxView({
                 {/* Expanded */}
                 {expanded === email.id && (
                   <div className="px-6 py-4 bg-indigo-50/40 dark:bg-indigo-950/10 border-t border-indigo-100 dark:border-indigo-900/30">
-                    <div className="flex items-start gap-3 mb-4">
+                    {/* AI metadata row */}
+                    <div className="flex flex-wrap items-center gap-2 mb-3">
+                      {email.aiConfidence > 0 && (
+                        <span className="text-[10px] font-medium bg-indigo-100 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 px-2 py-0.5 rounded-full">
+                          {Math.round(email.aiConfidence * 100)}% confidence
+                        </span>
+                      )}
+                      {getEstimatedReplyTime(email) && (
+                        <span className="text-[10px] font-medium bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400 px-2 py-0.5 rounded-full">
+                          Reply: {getEstimatedReplyTime(email)}
+                        </span>
+                      )}
+                      <span className="text-[10px] font-medium bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-slate-400 px-2 py-0.5 rounded-full">
+                        Suggested: {getSuggestedAction(email)}
+                      </span>
+                      {email.dueDate && (
+                        <span className="text-[10px] font-medium bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-400 px-2 py-0.5 rounded-full">
+                          Due: {email.dueDate}
+                        </span>
+                      )}
+                    </div>
+                    {/* AI summary or snippet */}
+                    <div className="flex items-start gap-3 mb-3">
                       <div className="w-8 h-8 rounded-lg bg-indigo-100 dark:bg-indigo-950/40 flex items-center justify-center flex-shrink-0">
                         <Sparkles className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
                       </div>
-                      <div>
-                        <p className="text-xs font-semibold text-indigo-700 dark:text-indigo-300 mb-1">Email snippet</p>
-                        <p className="text-sm text-gray-700 dark:text-slate-300">{email.snippet}</p>
+                      <div className="flex-1">
+                        <p className="text-xs font-semibold text-indigo-700 dark:text-indigo-300 mb-1">
+                          {email.aiSummary ? "AI Summary" : "Preview"}
+                        </p>
+                        <p className="text-sm text-gray-700 dark:text-slate-300 leading-relaxed">
+                          {email.aiSummary || email.snippet}
+                        </p>
                       </div>
                     </div>
+                    {/* Action items */}
+                    {email.actionItems && email.actionItems.length > 0 && (
+                      <div className="mb-3 bg-violet-50 dark:bg-violet-950/20 rounded-xl px-4 py-3">
+                        <p className="text-[10px] font-semibold text-violet-700 dark:text-violet-300 uppercase tracking-wide mb-2">Action Items</p>
+                        <div className="space-y-1.5">
+                          {email.actionItems.slice(0, 3).map((item, idx) => (
+                            <div key={idx} className="flex items-start gap-2">
+                              <CheckSquare className="w-3.5 h-3.5 text-violet-500 flex-shrink-0 mt-0.5" />
+                              <p className="text-xs text-gray-700 dark:text-slate-300">{item}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
 
                     {replyDone === email.id ? (
                       <div className="flex items-center gap-2 text-sm text-emerald-600 dark:text-emerald-400 font-medium mb-3">
@@ -1145,111 +1332,240 @@ function AIAssistantView({ userId }: { userId: string }) {
 // ─── INSIGHTS-POWERED VIEWS ───────────────────────────────────────────────────
 
 function ActionCenterView({ insights }: { insights: Insights }) {
-  const [done, setDone] = useState<number[]>([]);
-  return (
-    <div className="p-6 max-w-[900px] mx-auto">
-      <PageHeader title="Action Center" subtitle="AI-extracted tasks from your inbox" />
-      {insights.actionItems.length === 0 ? (
-        <EmptyInsights icon={CheckSquare} label="No action items detected yet. Sync your inbox to extract tasks." />
-      ) : (
+  const [done, setDone] = useState<Set<number>>(new Set());
+  const [snoozed, setSnoozed] = useState<Set<number>>(new Set());
+  const actionItems = Array.isArray(insights.actionItems) ? insights.actionItems : [];
+
+  const today = new Date().toISOString().split("T")[0];
+  const weekEnd = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+
+  const withIdx = actionItems.map((item, i) => ({ item, i })).filter(({ i }) => !snoozed.has(i));
+
+  const urgent = withIdx.filter(({ item }) => item.priority === "High" || (item.dueDate && item.dueDate < today));
+  const todayItems = withIdx.filter(({ item, i }) => !urgent.find(u => u.i === i) && item.dueDate === today);
+  const thisWeek = withIdx.filter(({ item, i }) =>
+    !urgent.find(u => u.i === i) && !todayItems.find(t => t.i === i) && item.dueDate && item.dueDate <= weekEnd
+  );
+  const later = withIdx.filter(({ item, i }) =>
+    !urgent.find(u => u.i === i) && !todayItems.find(t => t.i === i) && !thisWeek.find(w => w.i === i)
+  );
+
+  const renderGroup = (label: string, color: string, dot: string, items: typeof withIdx) => {
+    if (items.length === 0) return null;
+    return (
+      <div className="mb-6">
+        <div className="flex items-center gap-2 mb-3">
+          <span className={`w-2 h-2 rounded-full ${dot}`} />
+          <h3 className={`text-xs font-bold uppercase tracking-widest ${color}`}>{label}</h3>
+          <span className="text-[10px] bg-gray-100 dark:bg-slate-800 text-gray-500 dark:text-slate-500 px-2 py-0.5 rounded-full">{items.length}</span>
+        </div>
         <div className="space-y-2">
-          {insights.actionItems.map((item: any, i: number) => (
-            <Card key={i} className={`p-4 flex items-start gap-4 transition-opacity ${done.includes(i) ? "opacity-40" : ""}`}>
-              <button onClick={() => setDone((d) => d.includes(i) ? d.filter(x => x !== i) : [...d, i])} className="mt-0.5 flex-shrink-0">
-                {done.includes(i) ? <CheckCircle2 className="w-5 h-5 text-emerald-500" /> : <Circle className="w-5 h-5 text-gray-300 dark:text-slate-600" />}
+          {items.map(({ item, i }) => (
+            <Card key={i} className={`p-4 flex items-start gap-4 transition-all ${done.has(i) ? "opacity-40" : ""}`}>
+              <button onClick={() => setDone((d) => { const n = new Set(d); n.has(i) ? n.delete(i) : n.add(i); return n; })} className="mt-0.5 flex-shrink-0">
+                {done.has(i) ? <CheckCircle2 className="w-5 h-5 text-emerald-500" /> : <Circle className="w-5 h-5 text-gray-300 dark:text-slate-600" />}
               </button>
               <div className="flex-1 min-w-0">
-                <p className={`text-sm font-medium text-gray-900 dark:text-white ${done.includes(i) ? "line-through" : ""}`}>{item.text}</p>
-                <p className="text-xs text-gray-400 dark:text-slate-500 mt-0.5">From: {item.from}{item.dueDate ? ` · Due: ${item.dueDate}` : ""}</p>
+                <p className={`text-sm font-medium text-gray-900 dark:text-white ${done.has(i) ? "line-through" : ""}`}>{item.text}</p>
+                <div className="flex flex-wrap items-center gap-2 mt-1">
+                  {item.from && <span className="text-[11px] text-gray-400 dark:text-slate-500">From: {item.from}</span>}
+                  {item.dueDate && <span className="text-[11px] text-amber-600 dark:text-amber-400 font-medium">Due: {item.dueDate}</span>}
+                  {item.emailId && <span className="text-[11px] text-indigo-500 dark:text-indigo-400">#{item.emailId?.slice(-4)}</span>}
+                </div>
               </div>
-              <PriorityBadge priority={item.priority || "Medium"} />
+              <div className="flex flex-col items-end gap-2">
+                <PriorityBadge priority={item.priority || "Medium"} />
+                {!done.has(i) && (
+                  <button
+                    onClick={() => setSnoozed((s) => { const n = new Set(s); n.add(i); return n; })}
+                    className="text-[10px] text-gray-400 dark:text-slate-500 hover:text-amber-600 dark:hover:text-amber-400 transition-colors"
+                  >
+                    Snooze
+                  </button>
+                )}
+              </div>
             </Card>
           ))}
         </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="p-6 max-w-[900px] mx-auto">
+      <PageHeader
+        title="Action Center"
+        subtitle="AI-extracted tasks from your inbox"
+        action={
+          done.size > 0 ? (
+            <span className="text-xs text-emerald-600 dark:text-emerald-400 font-medium bg-emerald-50 dark:bg-emerald-950/30 px-3 py-1.5 rounded-xl">
+              {done.size} completed
+            </span>
+          ) : undefined
+        }
+      />
+      {actionItems.length === 0 ? (
+        <EmptyInsights icon={CheckSquare} label="No action items detected yet. Sync your inbox to extract tasks automatically." />
+      ) : (
+        <>
+          {renderGroup("Urgent", "text-red-600 dark:text-red-400", "bg-red-500", urgent)}
+          {renderGroup("Today", "text-amber-600 dark:text-amber-400", "bg-amber-500", todayItems)}
+          {renderGroup("This Week", "text-sky-600 dark:text-sky-400", "bg-sky-500", thisWeek)}
+          {renderGroup("Later", "text-gray-500 dark:text-slate-500", "bg-gray-400", later)}
+          {snoozed.size > 0 && (
+            <button
+              onClick={() => setSnoozed(new Set())}
+              className="text-xs text-gray-400 dark:text-slate-500 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
+            >
+              Show {snoozed.size} snoozed items
+            </button>
+          )}
+        </>
       )}
     </div>
   );
 }
 
 function WaitingOnView({ insights }: { insights: Insights }) {
-  const cols = [
-    { label: "Waiting On Others", items: insights.waitingOn, color: "border-amber-400" },
-    { label: "Waiting On Me", items: [] as any[], color: "border-red-400" },
-    { label: "Completed", items: [] as any[], color: "border-emerald-400" },
-  ];
-  return (
-    <div className="p-6">
-      <PageHeader title="Waiting On" subtitle="AI-detected threads awaiting responses" />
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {cols.map((col) => (
-          <div key={col.label}>
-            <div className={`flex items-center gap-2 mb-3 pb-3 border-b-2 ${col.color}`}>
-              <h3 className="font-semibold text-sm text-gray-900 dark:text-white" style={{ fontFamily: "'Plus Jakarta Sans',sans-serif" }}>{col.label}</h3>
-              <span className="text-[10px] bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-slate-400 px-2 py-0.5 rounded-full font-medium">{col.items.length}</span>
-            </div>
-            <div className="space-y-3">
-              {col.items.map((item: any, i: number) => (
-                <Card key={i} className="p-4">
-                  <p className="text-sm font-semibold text-gray-900 dark:text-white mb-1">{item.person}</p>
-                  <p className="text-xs text-gray-500 dark:text-slate-400 mb-2">{item.company} · {item.subject}</p>
-                  {item.days > 0 && (
-                    <p className={`text-[11px] font-semibold mb-2 ${item.days >= 4 ? "text-red-500" : "text-amber-500"}`}>{item.days}d waiting</p>
-                  )}
-                  {item.ai_tip && (
-                    <div className="flex items-start gap-1.5 mb-3 bg-indigo-50 dark:bg-indigo-950/30 rounded-lg p-2">
-                      <Sparkles className="w-3 h-3 text-indigo-500 flex-shrink-0 mt-0.5" />
-                      <p className="text-[10px] text-indigo-700 dark:text-indigo-300">{item.ai_tip}</p>
-                    </div>
-                  )}
-                  <PriorityBadge priority={item.priority || "Medium"} />
-                </Card>
-              ))}
-              {col.items.length === 0 && (
-                <div className="flex flex-col items-center justify-center py-10 text-center">
-                  <Check className="w-6 h-6 text-emerald-400 mb-2" />
-                  <p className="text-xs text-gray-400 dark:text-slate-500">All clear</p>
-                </div>
-              )}
-            </div>
-          </div>
-        ))}
+  const waitingItems = Array.isArray(insights.waitingOn) ? insights.waitingOn : [];
+  const stale = waitingItems.filter((w: any) => (w.days || 0) > 5);
+  const normal = waitingItems.filter((w: any) => (w.days || 0) <= 5);
+
+  const staleColor = (days: number) =>
+    days > 7 ? "text-red-600 dark:text-red-400" : "text-amber-600 dark:text-amber-400";
+
+  const renderItem = (item: any, i: number) => (
+    <Card key={i} className="p-4">
+      <div className="flex items-start justify-between mb-2">
+        <div>
+          <p className="text-sm font-semibold text-gray-900 dark:text-white">{item.person}</p>
+          {item.subject && <p className="text-xs text-gray-500 dark:text-slate-400 mt-0.5 line-clamp-1">{item.subject}</p>}
+        </div>
+        {(item.days || 0) > 0 && (
+          <span className={`text-xs font-bold flex-shrink-0 ml-2 ${staleColor(item.days || 0)}`}>
+            {item.days}d
+          </span>
+        )}
       </div>
+      {(item.aiTip || item.ai_tip) && (
+        <div className="flex items-start gap-1.5 mb-3 bg-indigo-50 dark:bg-indigo-950/30 rounded-lg p-2">
+          <Sparkles className="w-3 h-3 text-indigo-500 flex-shrink-0 mt-0.5" />
+          <p className="text-[10px] text-indigo-700 dark:text-indigo-300">{item.aiTip || item.ai_tip}</p>
+        </div>
+      )}
+      <div className="flex items-center justify-between">
+        <PriorityBadge priority={item.priority || "Medium"} />
+        {(item.days || 0) > 3 && (
+          <button className="text-[10px] font-medium bg-indigo-600 text-white px-2.5 py-1 rounded-lg hover:bg-indigo-700 transition-colors">
+            Follow Up
+          </button>
+        )}
+      </div>
+    </Card>
+  );
+
+  return (
+    <div className="p-6 max-w-[1000px] mx-auto">
+      <PageHeader title="Waiting On" subtitle="Threads where you're waiting for someone else to respond" />
+      {waitingItems.length === 0 ? (
+        <EmptyInsights icon={Clock} label="No pending threads detected. Sync your inbox to track conversations waiting for replies." />
+      ) : (
+        <div className="space-y-6">
+          {stale.length > 0 && (
+            <div>
+              <div className="flex items-center gap-2 mb-3">
+                <span className="w-2 h-2 rounded-full bg-red-500" />
+                <h3 className="text-xs font-bold uppercase tracking-widest text-red-600 dark:text-red-400">Stale — No Reply Over 5 Days</h3>
+                <span className="text-[10px] bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 px-2 py-0.5 rounded-full">{stale.length}</span>
+              </div>
+              <div className="space-y-3">{stale.map(renderItem)}</div>
+            </div>
+          )}
+          {normal.length > 0 && (
+            <div>
+              <div className="flex items-center gap-2 mb-3">
+                <span className="w-2 h-2 rounded-full bg-amber-400" />
+                <h3 className="text-xs font-bold uppercase tracking-widest text-amber-600 dark:text-amber-400">Waiting On Others</h3>
+                <span className="text-[10px] bg-amber-50 dark:bg-amber-950/30 text-amber-600 dark:text-amber-400 px-2 py-0.5 rounded-full">{normal.length}</span>
+              </div>
+              <div className="space-y-3">{normal.map(renderItem)}</div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
 
 function FollowUpsView({ insights }: { insights: Insights }) {
-  const statusStyle = (s: string) =>
-    s === "overdue" ? "bg-red-50 dark:bg-red-950/30 border-l-2 border-red-400" :
-    s === "due_today" ? "bg-amber-50 dark:bg-amber-950/30 border-l-2 border-amber-400" :
-    "bg-gray-50 dark:bg-[#1E2235] border-l-2 border-gray-200 dark:border-slate-700";
+  const [completed, setCompleted] = useState<Set<number>>(new Set());
+  const followUps = Array.isArray(insights.followUps) ? insights.followUps : [];
+  const overdue = followUps.filter((f: any) => f.status === "overdue");
+  const dueToday = followUps.filter((f: any) => f.status === "due_today");
+  const upcoming = followUps.filter((f: any) => f.status !== "overdue" && f.status !== "due_today");
+
+  const renderFollowUp = (p: any, i: number, globalIdx: number) => (
+    <Card key={i} className={`p-5 transition-opacity ${completed.has(globalIdx) ? "opacity-40" : ""}`}>
+      <div className="flex items-start gap-3">
+        <button
+          onClick={() => setCompleted(s => { const n = new Set(s); n.has(globalIdx) ? n.delete(globalIdx) : n.add(globalIdx); return n; })}
+          className="flex-shrink-0 mt-0.5"
+        >
+          {completed.has(globalIdx)
+            ? <CheckCircle2 className="w-5 h-5 text-emerald-500" />
+            : <Circle className="w-5 h-5 text-gray-300 dark:text-slate-600" />}
+        </button>
+        <div className="flex-1">
+          <p className={`text-sm font-semibold text-gray-900 dark:text-white italic mb-1 ${completed.has(globalIdx) ? "line-through" : ""}`}>
+            "{p.text}"
+          </p>
+          <div className="flex flex-wrap items-center gap-3 text-[11px] text-gray-500 dark:text-slate-400 mb-3">
+            {p.person && <span className="flex items-center gap-1"><Users className="w-3 h-3" />{p.person}</span>}
+            {p.dueDate && <span className="flex items-center gap-1 text-amber-600 dark:text-amber-400 font-medium"><Calendar className="w-3 h-3" />Due {p.dueDate}</span>}
+            {(p.email_subject || p.emailId) && <span className="flex items-center gap-1"><Mail className="w-3 h-3" />{p.email_subject || `Email #${p.emailId?.slice(-4)}`}</span>}
+          </div>
+          {!completed.has(globalIdx) && (
+            <div className="flex gap-2">
+              <button className="text-xs bg-indigo-600 text-white px-3 py-1.5 rounded-lg hover:bg-indigo-700 transition-colors flex items-center gap-1.5">
+                <Send className="w-3 h-3" /> Generate Follow-Up
+              </button>
+              <button
+                onClick={() => setCompleted(s => { const n = new Set(s); n.add(globalIdx); return n; })}
+                className="text-xs bg-white dark:bg-slate-800 text-gray-700 dark:text-slate-300 border border-gray-200 dark:border-white/10 px-3 py-1.5 rounded-lg hover:bg-gray-50 transition-colors flex items-center gap-1.5"
+              >
+                <Check className="w-3 h-3" /> Mark Complete
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </Card>
+  );
+
+  const renderGroup = (label: string, color: string, items: any[], offset: number) => {
+    if (items.length === 0) return null;
+    return (
+      <div className="mb-6">
+        <div className="flex items-center gap-2 mb-3">
+          <h3 className={`text-xs font-bold uppercase tracking-widest ${color}`}>{label}</h3>
+          <span className="text-[10px] bg-gray-100 dark:bg-slate-800 text-gray-500 px-2 py-0.5 rounded-full">{items.length}</span>
+        </div>
+        <div className="space-y-3">{items.map((p, i) => renderFollowUp(p, i, offset + i))}</div>
+      </div>
+    );
+  };
 
   return (
     <div className="p-6 max-w-[900px] mx-auto">
       <PageHeader title="Follow-Up Center" subtitle="Promises and commitments detected by AI" />
-      {insights.followUps.length === 0 ? (
-        <EmptyInsights icon={Users} label="No follow-ups detected yet. Sync your inbox to find commitments." />
+      {followUps.length === 0 ? (
+        <EmptyInsights icon={Users} label="No follow-ups detected yet. AI detects phrases like 'I'll send', 'I'll review', and 'I'll get back to you'." />
       ) : (
-        <div className="space-y-3">
-          {insights.followUps.map((p: any, i: number) => (
-            <div key={i} className={`rounded-2xl p-5 ${statusStyle(p.status)}`}>
-              <p className="text-sm font-semibold text-gray-900 dark:text-white italic mb-1">"{p.text}"</p>
-              <div className="flex flex-wrap items-center gap-3 text-[11px] text-gray-500 dark:text-slate-400 mb-3">
-                <span><Users className="w-3 h-3 inline mr-1" />{p.person}</span>
-                {p.dueDate && <span><Calendar className="w-3 h-3 inline mr-1" />Due {p.dueDate}</span>}
-                <span><Mail className="w-3 h-3 inline mr-1" />{p.email_subject}</span>
-              </div>
-              <div className="flex gap-2">
-                <button className="text-xs bg-indigo-600 text-white px-3 py-1.5 rounded-lg hover:bg-indigo-700 transition-colors flex items-center gap-1.5">
-                  <Send className="w-3 h-3" /> Send Follow-Up
-                </button>
-                <button className="text-xs bg-white dark:bg-slate-800 text-gray-700 dark:text-slate-300 border border-gray-200 dark:border-white/10 px-3 py-1.5 rounded-lg hover:bg-gray-50 transition-colors flex items-center gap-1.5">
-                  <Check className="w-3 h-3" /> Mark Complete
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
+        <>
+          {renderGroup("Overdue", "text-red-600 dark:text-red-400", overdue, 0)}
+          {renderGroup("Due Today", "text-amber-600 dark:text-amber-400", dueToday, overdue.length)}
+          {renderGroup("Upcoming", "text-sky-600 dark:text-sky-400", upcoming, overdue.length + dueToday.length)}
+        </>
       )}
     </div>
   );
@@ -1320,32 +1636,50 @@ function BillsView({ insights }: { insights: Insights }) {
 }
 
 function CalendarView({ insights }: { insights: Insights }) {
+  const calendarItems = Array.isArray(insights.calendar) ? insights.calendar : [];
+  const typeColor = (type: string) => {
+    if (type === "meeting") return "bg-indigo-500";
+    if (type === "deadline") return "bg-red-500";
+    if (type === "travel") return "bg-amber-500";
+    return "bg-sky-500";
+  };
+
   return (
-    <div className="p-6 max-w-[900px] mx-auto">
-      <PageHeader title="Calendar Intelligence" subtitle="Events detected from your inbox by AI" />
-      {insights.calendar.length === 0 ? (
-        <EmptyInsights icon={Calendar} label="No calendar events detected yet. Sync your inbox to find meetings and events." />
+    <div className="p-6 max-w-[1000px] mx-auto">
+      <PageHeader title="Calendar Intelligence" subtitle="Events and meetings detected from your inbox by AI" />
+      {calendarItems.length === 0 ? (
+        <EmptyInsights icon={Calendar} label="No calendar events detected yet. Sync your inbox to find meetings, deadlines, and travel." />
       ) : (
-        <Card className="overflow-hidden">
-          <div className="divide-y divide-gray-50 dark:divide-white/[0.03]">
-            {insights.calendar.map((ev: any, i: number) => (
-              <div key={i} className="flex gap-4 px-5 py-4 hover:bg-gray-50 dark:hover:bg-white/[0.02] transition-colors">
-                <div className="w-20 flex-shrink-0 text-right">
-                  <span className="text-xs font-medium text-gray-500 dark:text-slate-400">{ev.time}</span>
-                </div>
-                <div className="w-1 rounded-full bg-indigo-500 flex-shrink-0" />
+        <div className="space-y-3">
+          {calendarItems.map((ev: any, i: number) => (
+            <Card key={i} className="p-5">
+              <div className="flex items-start gap-4">
+                <div className={`w-1 self-stretch rounded-full ${typeColor(ev.type)} flex-shrink-0`} />
                 <div className="flex-1">
-                  <div className="flex items-center gap-2 mb-0.5">
-                    <p className="text-sm font-semibold text-gray-900 dark:text-white">{ev.title}</p>
-                    <span className="text-[10px] bg-gray-100 dark:bg-slate-800 text-gray-500 dark:text-slate-400 px-2 py-0.5 rounded-full">{ev.type}</span>
+                  <div className="flex items-start justify-between gap-3 mb-1">
+                    <div>
+                      <p className="text-sm font-semibold text-gray-900 dark:text-white">{ev.title}</p>
+                      <div className="flex flex-wrap items-center gap-3 text-xs text-gray-400 dark:text-slate-500 mt-1">
+                        {ev.date && <span className="flex items-center gap-1"><Calendar className="w-3 h-3" />{ev.date}</span>}
+                        {ev.time && <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{ev.time}</span>}
+                        {ev.location && <span className="flex items-center gap-1"><Globe className="w-3 h-3" />{ev.location}</span>}
+                      </div>
+                    </div>
+                    <span className="text-[10px] bg-gray-100 dark:bg-slate-800 text-gray-500 dark:text-slate-400 px-2 py-0.5 rounded-full capitalize flex-shrink-0">{ev.type}</span>
                   </div>
-                  {ev.location && <p className="text-xs text-gray-400 dark:text-slate-500">{ev.location}</p>}
-                  {ev.date && <p className="text-xs text-gray-400 dark:text-slate-500">{ev.date}</p>}
+                  <div className="flex gap-2 mt-3">
+                    <button className="text-[10px] font-medium bg-indigo-50 dark:bg-indigo-950/30 text-indigo-700 dark:text-indigo-300 px-2.5 py-1 rounded-lg hover:bg-indigo-100 transition-colors flex items-center gap-1">
+                      <Sparkles className="w-3 h-3" /> Prepare for this meeting
+                    </button>
+                    <button className="text-[10px] font-medium bg-gray-50 dark:bg-slate-800 text-gray-600 dark:text-slate-400 px-2.5 py-1 rounded-lg hover:bg-gray-100 transition-colors flex items-center gap-1">
+                      <Mail className="w-3 h-3" /> Related emails
+                    </button>
+                  </div>
                 </div>
               </div>
-            ))}
-          </div>
-        </Card>
+            </Card>
+          ))}
+        </div>
       )}
     </div>
   );
@@ -1506,16 +1840,27 @@ function SearchView({ accessToken, userId }: { accessToken: string; userId: stri
 
 function AnalyticsView({ emails, stats }: { emails: GmailEmail[]; stats: Stats }) {
   const categoryData = Object.entries(stats.byCategory || {}).map(([name, count]) => ({ name, count }));
+  const priorityData = [
+    { name: "High", count: emails.filter(e => e.priority === "High").length },
+    { name: "Medium", count: emails.filter(e => e.priority === "Medium").length },
+    { name: "Low", count: emails.filter(e => e.priority === "Low").length },
+  ].filter(d => d.count > 0);
+
+  const readRate = stats.total ? Math.round(((stats.total - (stats.unread || 0)) / stats.total) * 100) : 0;
+  const replyRate = emails.length ? Math.round((emails.filter(e => !e.requiresReply || e.isRead).length / emails.length) * 100) : 0;
+  const importantRate = stats.total ? Math.round(((stats.important || 0) / stats.total) * 100) : 0;
 
   return (
     <div className="p-6 max-w-[1100px] mx-auto">
-      <PageHeader title="Analytics" subtitle="Your email productivity overview" />
+      <PageHeader title="Analytics" subtitle="Your inbox intelligence and productivity overview" />
+
+      {/* Top metrics */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         {[
-          { label: "Total Emails", value: stats.total || 0, icon: Mail, color: "indigo" },
-          { label: "Unread", value: stats.unread || 0, icon: Inbox, color: "amber" },
-          { label: "Important", value: stats.important || 0, icon: Star, color: "violet" },
-          { label: "Read Rate", value: `${stats.total ? Math.round(((stats.total - (stats.unread || 0)) / stats.total) * 100) : 0}%`, icon: TrendingUp, color: "emerald" },
+          { label: "Total Emails", value: stats.total || 0, icon: Mail, color: "indigo", sub: "in inbox" },
+          { label: "Read Rate", value: `${readRate}%`, icon: TrendingUp, color: "emerald", sub: `${stats.total - (stats.unread || 0)} read` },
+          { label: "Important", value: stats.important || 0, icon: Star, color: "violet", sub: `${importantRate}% of inbox` },
+          { label: "Needs Reply", value: emails.filter(e => e.requiresReply && !e.isRead).length, icon: Reply, color: "amber", sub: "pending replies" },
         ].map((s) => {
           const { bg, icon: iconCls } = colorMap[s.color] ?? colorMap.slate;
           return (
@@ -1524,27 +1869,69 @@ function AnalyticsView({ emails, stats }: { emails: GmailEmail[]; stats: Stats }
                 <s.icon className={`w-5 h-5 ${iconCls}`} />
               </div>
               <div className="text-3xl font-extrabold text-gray-900 dark:text-white" style={{ fontFamily: "'Plus Jakarta Sans',sans-serif" }}>{s.value}</div>
-              <p className="text-xs text-gray-500 dark:text-slate-400 mt-0.5">{s.label}</p>
+              <p className="text-xs font-medium text-gray-700 dark:text-slate-300 mt-0.5">{s.label}</p>
+              <p className="text-[11px] text-gray-400 dark:text-slate-500">{s.sub}</p>
             </Card>
           );
         })}
       </div>
-      {categoryData.length > 0 && (
-        <Card className="p-5">
-          <h3 className="font-semibold text-sm text-gray-900 dark:text-white mb-4" style={{ fontFamily: "'Plus Jakarta Sans',sans-serif" }}>Emails by Category</h3>
-          <div className="h-56">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={categoryData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.04)" />
-                <XAxis dataKey="name" tick={{ fontSize: 10, fill: "#94A3B8" }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fontSize: 10, fill: "#94A3B8" }} axisLine={false} tickLine={false} />
-                <Tooltip contentStyle={{ background: "#1E2235", border: "none", borderRadius: 12, fontSize: 12, color: "#E2E8F0" }} />
-                <Bar dataKey="count" fill="#4F46E5" radius={[6, 6, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </Card>
-      )}
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        {categoryData.length > 0 && (
+          <Card className="p-5">
+            <h3 className="font-semibold text-sm text-gray-900 dark:text-white mb-4" style={{ fontFamily: "'Plus Jakarta Sans',sans-serif" }}>Emails by Category</h3>
+            <div className="h-52">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={categoryData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.04)" />
+                  <XAxis dataKey="name" tick={{ fontSize: 10, fill: "#94A3B8" }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fontSize: 10, fill: "#94A3B8" }} axisLine={false} tickLine={false} />
+                  <Tooltip contentStyle={{ background: "#1E2235", border: "none", borderRadius: 12, fontSize: 12, color: "#E2E8F0" }} />
+                  <Bar dataKey="count" fill="#4F46E5" radius={[6, 6, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </Card>
+        )}
+        {priorityData.length > 0 && (
+          <Card className="p-5">
+            <h3 className="font-semibold text-sm text-gray-900 dark:text-white mb-4" style={{ fontFamily: "'Plus Jakarta Sans',sans-serif" }}>Emails by Priority</h3>
+            <div className="h-52">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={priorityData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.04)" />
+                  <XAxis dataKey="name" tick={{ fontSize: 10, fill: "#94A3B8" }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fontSize: 10, fill: "#94A3B8" }} axisLine={false} tickLine={false} />
+                  <Tooltip contentStyle={{ background: "#1E2235", border: "none", borderRadius: 12, fontSize: 12, color: "#E2E8F0" }} />
+                  <Bar dataKey="count" fill="#7C3AED" radius={[6, 6, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </Card>
+        )}
+      </div>
+
+      {/* Health breakdown */}
+      <Card className="mt-5 p-5">
+        <h3 className="font-semibold text-sm text-gray-900 dark:text-white mb-4" style={{ fontFamily: "'Plus Jakarta Sans',sans-serif" }}>Inbox Health Breakdown</h3>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+          {[
+            { label: "Read Rate", value: readRate, color: "bg-emerald-500" },
+            { label: "Reply Rate", value: replyRate, color: "bg-indigo-500" },
+            { label: "Low Priority", value: stats.total ? Math.round((emails.filter(e => e.priority === "Low").length / stats.total) * 100) : 0, color: "bg-slate-400" },
+          ].map(m => (
+            <div key={m.label}>
+              <div className="flex items-center justify-between mb-1.5">
+                <p className="text-xs font-medium text-gray-700 dark:text-slate-300">{m.label}</p>
+                <p className="text-xs font-bold text-gray-900 dark:text-white">{m.value}%</p>
+              </div>
+              <div className="h-2 bg-gray-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                <div className={`h-full ${m.color} rounded-full transition-all`} style={{ width: `${m.value}%` }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      </Card>
     </div>
   );
 }
@@ -1636,15 +2023,66 @@ function AttachmentsView({ emails }: { emails: GmailEmail[] }) {
   );
 }
 
-function AutomationsView() {
+function AutomationsView({ emails }: { emails?: GmailEmail[] }) {
+  const [dismissed, setDismissed] = useState<Set<string>>(new Set());
+  const emailArr = emails || [];
+
   const rules = [
     { name: "Newsletter Filter", trigger: "Newsletter or unsubscribe link detected", action: "Label as Newsletters", active: true },
     { name: "Bill Tracker", trigger: "Invoice or bill keyword in subject", action: "Add to Bills tracker", active: true },
     { name: "Shipment Monitor", trigger: "Tracking number detected", action: "Add to Purchases", active: true },
   ];
+
+  const newsletterCount = emailArr.filter(e => e.category === "Newsletter").length;
+  const workCount = emailArr.filter(e => e.category === "Work").length;
+  const financeCount = emailArr.filter(e => e.category === "Finance").length;
+  const unreadImportant = emailArr.filter(e => !e.isRead && e.isImportant).length;
+
+  const suggestions = [
+    newsletterCount >= 5
+      ? { id: "newsletters", text: `You have ${newsletterCount} newsletters. Auto-archive newsletters to reduce noise?`, action: "Enable Auto-Archive" }
+      : null,
+    financeCount >= 3
+      ? { id: "finance", text: `${financeCount} finance emails detected this sync. Auto-tag as Finance?`, action: "Enable Auto-Tag" }
+      : null,
+    unreadImportant >= 5
+      ? { id: "morning", text: `You have ${unreadImportant} unread important emails. Get a morning digest summary?`, action: "Enable Digest" }
+      : null,
+    workCount >= 10
+      ? { id: "work", text: `${workCount} work emails found. Auto-prioritize work emails during business hours?`, action: "Enable Priority Hours" }
+      : null,
+  ].filter(Boolean).filter(s => !dismissed.has(s!.id)) as Array<{ id: string; text: string; action: string }>;
+
   return (
     <div className="p-6 max-w-[900px] mx-auto">
-      <PageHeader title="Automations" subtitle="Active rules running on your inbox" />
+      <PageHeader title="Automations" subtitle="Active rules and AI-suggested automations for your inbox" />
+
+      {suggestions.length > 0 && (
+        <div className="mb-6">
+          <p className="text-[11px] font-semibold text-gray-400 dark:text-slate-500 uppercase tracking-widest mb-3">AI Suggestions</p>
+          <div className="space-y-3">
+            {suggestions.map(s => (
+              <div key={s.id} className="flex items-start gap-4 p-4 rounded-2xl bg-indigo-50 dark:bg-indigo-950/20 border border-indigo-100 dark:border-indigo-900/30">
+                <Sparkles className="w-4 h-4 text-indigo-500 flex-shrink-0 mt-0.5" />
+                <p className="text-sm text-gray-700 dark:text-slate-300 flex-1">{s.text}</p>
+                <div className="flex gap-2 flex-shrink-0">
+                  <button className="text-[10px] font-semibold bg-indigo-600 text-white px-2.5 py-1 rounded-lg hover:bg-indigo-700 transition-colors">
+                    {s.action}
+                  </button>
+                  <button
+                    onClick={() => setDismissed(d => new Set([...d, s.id]))}
+                    className="text-[10px] text-gray-400 dark:text-slate-500 hover:text-gray-600 dark:hover:text-slate-300 px-2 py-1 transition-colors"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <p className="text-[11px] font-semibold text-gray-400 dark:text-slate-500 uppercase tracking-widest mb-3">Active Rules</p>
       <div className="space-y-3">
         {rules.map((r, i) => (
           <Card key={i} className="p-5 flex items-center gap-4">
@@ -2245,7 +2683,7 @@ function MainApp() {
         {view === "analytics"   && <AnalyticsView emails={emails} stats={stats} />}
         {view === "settings"    && <SettingsView user={user} onSignOut={handleSignOut} lastSync={lastSync} onRepairData={async () => { const r = await repairAIData(); const fresh = await getCachedEmails(user!.id); setEmails(Array.isArray(fresh.emails) ? fresh.emails.map(normalizeEmail) : []); const ins = await getInsights(user!.id); setInsights({ actionItems: Array.isArray(ins?.actionItems) ? ins.actionItems : [], waitingOn: Array.isArray(ins?.waitingOn) ? ins.waitingOn : [], bills: Array.isArray(ins?.bills) ? ins.bills : [], followUps: Array.isArray(ins?.followUps) ? ins.followUps : [], calendar: Array.isArray(ins?.calendar) ? ins.calendar : [], security: Array.isArray(ins?.security) ? ins.security : [], purchases: Array.isArray(ins?.purchases) ? ins.purchases : [] }); void loadBrief(user!.id); return r; }} />}
         {view === "attachments" && <AttachmentsView emails={emails} />}
-        {view === "automations" && <AutomationsView />}
+        {view === "automations" && <AutomationsView emails={emails} />}
       </main>
     </div>
   );
