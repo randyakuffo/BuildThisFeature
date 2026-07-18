@@ -415,7 +415,7 @@ export function MainApp() {
           {view === "calendar" && <Views.CalendarView insights={insights} />}
           {view === "purchases" && <Views.PurchasesView insights={insights} />}
           {view === "security" && <Views.SecurityView insights={insights} />}
-          {view === "search" && <Views.SearchView />}
+          {view === "search" && <Views.SearchView emails={emails} />}
           {view === "analytics" && <Views.AnalyticsView emails={emails} stats={stats} />}
           {view === "settings" && (
             <Views.SettingsView
@@ -442,7 +442,13 @@ export function MainApp() {
             />
           )}
           {view === "attachments" && <Views.AttachmentsView emails={emails} />}
-          {view === "automations" && <Views.AutomationsView emails={emails} />}
+          {view === "automations" && (
+            <Views.AutomationsView
+              emails={emails}
+              userId={user?.id || ""}
+              onArchive={handleArchive}
+            />
+          )}
         </Suspense>
       </main>
     </div>
