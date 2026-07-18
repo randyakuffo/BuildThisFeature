@@ -6,6 +6,7 @@
   "scripts": {
     "build": "vite build",
     "dev": "vite --host",
+    "preview": "vite preview --host",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },

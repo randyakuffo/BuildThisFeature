@@ -27,7 +27,8 @@ export default defineConfig({
   server: {
     host: true,
     port: 5173,
-    strictPort: true,
+    // If 5173 is taken, Vite picks the next free port and prints the URL.
+    strictPort: false,
   },
   preview: {
     host: true,

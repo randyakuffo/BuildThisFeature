@@ -11,16 +11,43 @@ Original Figma design: https://www.figma.com/design/IvYUNDCSwTwJH1eqHBFwpU/Build
 - A Supabase project with Google OAuth enabled
 - Gmail API scopes configured on the Google OAuth client
 
-## Quick start
+## Quick start (on your computer)
+
+`localhost` in Chrome means **your Mac/PC**, not a cloud agent. You must start the dev server on the same machine as your browser.
 
 ```bash
+# 1. Clone and enter the repo (if you haven't already)
+git clone https://github.com/randyakuffo/BuildThisFeature.git
+cd BuildThisFeature
+git checkout cursor/address-review-callouts-9953
+
+# 2. Install Node 20+ and pnpm, then:
 pnpm install
 pnpm dev
 ```
 
-Open the URL printed by Vite (typically http://localhost:5173).
+Vite will print a URL like `http://localhost:5173/` — open **that exact URL** in Chrome.
 
-If the page does not load in Cursor or a remote environment, the dev server must bind to all interfaces (`vite --host`, already configured). Use the **Ports** panel in Cursor to forward port `5173`, or run `pnpm dev` locally on your machine.
+> **Using Cursor Cloud Agent?** The agent's server is remote. Either forward port **5173** in Cursor's **Ports** tab, or run `pnpm dev` locally in your own terminal (steps above).
+
+### Chrome error → fix
+
+| What you see in Chrome | Cause | Fix |
+|------------------------|-------|-----|
+| `ERR_CONNECTION_REFUSED` / "This site can't be reached" | Nothing is listening on port 5173 on your machine | Run `pnpm dev` in a terminal on your computer |
+| `ERR_EMPTY_RESPONSE` | Dev server crashed or port forwarding dropped | Restart `pnpm dev`; in Cursor, re-forward port 5173 |
+| Page loads but Google login fails | Supabase redirect URL missing | Add `http://localhost:5173/` in Supabase → Auth → Redirect URLs |
+| Page loads but API calls fail (CORS) | `ALLOWED_ORIGINS` secret missing localhost | Set `ALLOWED_ORIGINS=http://localhost:5173` in Supabase secrets |
+| Port already in use | Another app uses 5173 | Vite will auto-pick the next port — use the URL it prints |
+
+### Don't have pnpm?
+
+```bash
+npm install -g pnpm
+# or use npm directly:
+npm install
+npm run dev
+```
 
 ### Supabase Auth redirect (required for Google login)
 
@@ -35,6 +62,7 @@ http://localhost:5173/
 | Command | Description |
 |---------|-------------|
 | `pnpm dev` | Start Vite dev server |
+| `pnpm preview` | Serve production build locally |
 | `pnpm build` | Production build |
 | `pnpm typecheck` | TypeScript check |
 | `pnpm test` | Run unit tests (Vitest) |
