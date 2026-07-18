@@ -40,7 +40,11 @@ export function AppStartup() {
         console.log("InboxOS auth startup:", session ? "session found" : "no session");
 
         if (session?.provider_token) {
-          await storeGoogleTokens(session.provider_token, session.provider_refresh_token ?? null);
+          try {
+            await storeGoogleTokens(session.provider_token, session.provider_refresh_token ?? null);
+          } catch (tokenError) {
+            console.warn("InboxOS store Google tokens skipped:", tokenError);
+          }
         }
 
         if (session && url.searchParams.has("code")) {
@@ -84,6 +88,8 @@ export function AppStartup() {
             onClick={async () => {
               await supabase.auth.signOut();
               localStorage.removeItem("inboxos-supabase-auth");
+              sessionStorage.removeItem("inboxos-google-provider-token");
+              sessionStorage.removeItem("inboxos-google-provider-refresh-token");
               window.history.replaceState({}, document.title, window.location.pathname);
               window.location.reload();
             }}

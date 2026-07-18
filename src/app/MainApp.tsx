@@ -9,6 +9,7 @@ import {
   reclassifyEmails,
   repairAIData,
   storeGoogleTokens,
+  type GoogleSessionTokens,
 } from "../lib/supabase";
 import { normalizeEmail } from "../lib/normalize";
 import type { View, AppState, Stats, DailyBrief, AIProcessingStatus, Insights } from "./types";
@@ -16,12 +17,23 @@ import { Spinner } from "./components/primitives";
 import { EMPTY_INSIGHTS } from "./lib/helpers";
 import * as Views from "./views";
 
-function sessionTokens(session: { provider_token?: string | null; provider_refresh_token?: string | null } | null) {
-  if (!session?.provider_token) return undefined;
-  return {
-    googleProviderToken: session.provider_token,
-    googleProviderRefreshToken: session.provider_refresh_token ?? null,
-  };
+function sessionTokens(session: { provider_token?: string | null; provider_refresh_token?: string | null } | null): GoogleSessionTokens | undefined {
+  if (session?.provider_token) {
+    return {
+      googleProviderToken: session.provider_token,
+      googleProviderRefreshToken: session.provider_refresh_token ?? null,
+    };
+  }
+  try {
+    const googleProviderToken = sessionStorage.getItem("inboxos-google-provider-token");
+    if (!googleProviderToken) return undefined;
+    return {
+      googleProviderToken,
+      googleProviderRefreshToken: sessionStorage.getItem("inboxos-google-provider-refresh-token"),
+    };
+  } catch {
+    return undefined;
+  }
 }
 
 export function MainApp() {

@@ -78,6 +78,7 @@ export async function clearGoogleTokens() {
 }
 
 export async function signOut() {
+  clearProviderTokensLocally();
   await clearGoogleTokens();
   await supabase.auth.signOut();
 }
@@ -107,6 +108,68 @@ export interface GoogleSessionTokens {
   googleProviderRefreshToken?: string | null;
 }
 
+const PROVIDER_TOKEN_KEY = "inboxos-google-provider-token";
+const PROVIDER_REFRESH_KEY = "inboxos-google-provider-refresh-token";
+
+function saveProviderTokensLocally(
+  googleProviderToken: string,
+  googleProviderRefreshToken?: string | null,
+) {
+  try {
+    sessionStorage.setItem(PROVIDER_TOKEN_KEY, googleProviderToken);
+    if (googleProviderRefreshToken) {
+      sessionStorage.setItem(PROVIDER_REFRESH_KEY, googleProviderRefreshToken);
+    }
+  } catch (error) {
+    console.warn("InboxOS could not cache provider token in sessionStorage:", error);
+  }
+}
+
+function readProviderTokensLocally(): GoogleSessionTokens | undefined {
+  try {
+    const googleProviderToken = sessionStorage.getItem(PROVIDER_TOKEN_KEY);
+    if (!googleProviderToken) return undefined;
+    return {
+      googleProviderToken,
+      googleProviderRefreshToken: sessionStorage.getItem(PROVIDER_REFRESH_KEY),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+export function clearProviderTokensLocally() {
+  try {
+    sessionStorage.removeItem(PROVIDER_TOKEN_KEY);
+    sessionStorage.removeItem(PROVIDER_REFRESH_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+async function getProviderTokensFromSession(): Promise<GoogleSessionTokens | undefined> {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (session?.provider_token) {
+    saveProviderTokensLocally(session.provider_token, session.provider_refresh_token ?? null);
+    return {
+      googleProviderToken: session.provider_token,
+      googleProviderRefreshToken: session.provider_refresh_token ?? null,
+    };
+  }
+  return readProviderTokensLocally();
+}
+
+async function gmailRequestBody(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const tokens = await getProviderTokensFromSession();
+  if (tokens?.googleProviderToken) {
+    payload.googleProviderToken = tokens.googleProviderToken;
+    if (tokens.googleProviderRefreshToken) {
+      payload.googleProviderRefreshToken = tokens.googleProviderRefreshToken;
+    }
+  }
+  return payload;
+}
+
 export async function storeGoogleTokens(
   googleProviderToken: string,
   googleProviderRefreshToken?: string | null,
@@ -132,9 +195,15 @@ export async function storeGoogleTokens(
 
   const result = await response.json().catch(() => null);
   if (!response.ok) {
-    throw new Error(result?.error || result?.message || `Store Google tokens failed with status ${response.status}.`);
+    // Best-effort: endpoint may not be deployed yet; fall back to session-scoped cache.
+    console.warn("InboxOS store Google tokens failed:", {
+      status: response.status,
+      result,
+    });
+    saveProviderTokensLocally(googleProviderToken, googleProviderRefreshToken ?? null);
+    return { success: false, status: response.status, result };
   }
-  return result;
+  return { success: true, ...result };
 }
 
 export async function syncGmail(userId: string, tokens?: GoogleSessionTokens) {
@@ -206,7 +275,7 @@ export async function archiveEmail(messageId: string, userId: string) {
   const res = await fetch(`${SERVER}/gmail/archive`, {
     method: "POST",
     headers,
-    body: JSON.stringify({ message_id: messageId, user_id: userId }),
+    body: JSON.stringify(await gmailRequestBody({ message_id: messageId, user_id: userId })),
   });
   return res.json();
 }
@@ -216,7 +285,7 @@ export async function markAsRead(messageId: string, userId: string) {
   const res = await fetch(`${SERVER}/gmail/mark-read`, {
     method: "POST",
     headers,
-    body: JSON.stringify({ message_id: messageId, user_id: userId }),
+    body: JSON.stringify(await gmailRequestBody({ message_id: messageId, user_id: userId })),
   });
   return res.json();
 }
@@ -226,7 +295,7 @@ export async function searchEmails(query: string) {
   const res = await fetch(`${SERVER}/gmail/search`, {
     method: "POST",
     headers,
-    body: JSON.stringify({ query }),
+    body: JSON.stringify(await gmailRequestBody({ query })),
   });
   return res.json();
 }
@@ -236,7 +305,7 @@ export async function fetchMessageBody(messageId: string) {
   const res = await fetch(`${SERVER}/gmail/message`, {
     method: "POST",
     headers,
-    body: JSON.stringify({ message_id: messageId }),
+    body: JSON.stringify(await gmailRequestBody({ message_id: messageId })),
   });
   return res.json();
 }
@@ -251,7 +320,7 @@ export async function sendReply(
   const res = await fetch(`${SERVER}/gmail/send`, {
     method: "POST",
     headers,
-    body: JSON.stringify({ to, subject, body, thread_id: threadId }),
+    body: JSON.stringify(await gmailRequestBody({ to, subject, body, thread_id: threadId })),
   });
   return res.json();
 }
