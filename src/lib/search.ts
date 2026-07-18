@@ -16,15 +16,58 @@ function haystack(email: GmailEmail): string {
     .toLowerCase();
 }
 
-export function searchCachedEmails(emails: GmailEmail[], query: string): GmailEmail[] {
+const PRESET_KEYWORDS: Record<string, string[]> = {
+  invoices: ["invoice", "receipt", "billing", "payment due"],
+  receipts: ["receipt", "order confirmation", "payment received"],
+  "flight confirmation": ["flight", "itinerary", "boarding", "confirmation"],
+  contracts: ["contract", "agreement", "nda", "signature required"],
+  "from my boss": ["urgent", "action required", "important"],
+};
+
+function termMatches(text: string, term: string): boolean {
+  if (text.includes(term)) return true;
+  if (term.length > 3 && term.endsWith("s") && text.includes(term.slice(0, -1))) return true;
+  if (!term.endsWith("s") && text.includes(`${term}s`)) return true;
+  return false;
+}
+
+function isInLastMonth(email: GmailEmail): boolean {
+  if (!email.receivedAt) return false;
+  const received = new Date(email.receivedAt);
+  if (Number.isNaN(received.getTime())) return false;
+  const now = new Date();
+  const after = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const before = new Date(now.getFullYear(), now.getMonth(), 1);
+  return received >= after && received < before;
+}
+
+/** True when an email matches the user's search text (not Gmail query syntax). */
+export function emailMatchesQuery(email: GmailEmail, query: string): boolean {
+  const trimmed = query.trim();
+  if (!trimmed) return false;
+
+  const lower = trimmed.toLowerCase();
+  const presetTerms = PRESET_KEYWORDS[lower];
+  if (presetTerms) {
+    const text = haystack(email);
+    return presetTerms.some((term) => termMatches(text, term));
+  }
+
+  if (lower === "last month") return isInLastMonth(email);
+
+  const terms = lower.split(/\s+/).filter(Boolean);
+  const text = haystack(email);
+  return terms.every((term) => termMatches(text, term));
+}
+
+export function filterRelevantEmails(emails: GmailEmail[], query: string): GmailEmail[] {
   const trimmed = query.trim();
   if (!trimmed) return [];
+  return emails.filter((email) => emailMatchesQuery(email, trimmed));
+}
 
-  const terms = trimmed.toLowerCase().split(/\s+/).filter(Boolean);
-  return emails.filter((email) => {
-    const text = haystack(email);
-    return terms.every((term) => text.includes(term));
-  });
+export function searchCachedEmails(emails: GmailEmail[], query: string): GmailEmail[] {
+  return filterRelevantEmails(emails, query);
 }
 
 /** Map friendly UI queries to Gmail search syntax. */
@@ -64,4 +107,29 @@ export function mergeEmailResults(...lists: GmailEmail[][]): GmailEmail[] {
     }
   }
   return Array.from(byId.values());
+}
+
+/** Merge result lists and keep only emails that match the user's query. */
+export function mergeSearchResults(userQuery: string, ...lists: GmailEmail[][]): GmailEmail[] {
+  return filterRelevantEmails(mergeEmailResults(...lists), userQuery);
+}
+
+/**
+ * Detect when a Gmail API response looks like an unfiltered inbox dump
+ * (common when the deployed backend ignores the search query).
+ */
+export function sanitizeRemoteSearchResults(
+  remoteResults: GmailEmail[],
+  userQuery: string,
+): GmailEmail[] {
+  if (!remoteResults.length) return [];
+
+  const relevant = filterRelevantEmails(remoteResults, userQuery);
+  if (!relevant.length) return [];
+
+  const ratio = relevant.length / remoteResults.length;
+  if (remoteResults.length >= 5 && ratio < 0.35) return relevant;
+  if (remoteResults.length >= 3 && ratio < 0.5) return relevant;
+
+  return relevant;
 }

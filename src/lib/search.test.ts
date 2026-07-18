@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { searchCachedEmails, toGmailQuery, mergeEmailResults } from "./search";
+import {
+  emailMatchesQuery,
+  filterRelevantEmails,
+  mergeEmailResults,
+  mergeSearchResults,
+  sanitizeRemoteSearchResults,
+  searchCachedEmails,
+  toGmailQuery,
+} from "./search";
 import type { GmailEmail } from "./normalize";
 
 const sample: GmailEmail[] = [
@@ -76,5 +84,66 @@ describe("mergeEmailResults", () => {
   it("dedupes by id", () => {
     const merged = mergeEmailResults(sample, [{ ...sample[0], subject: "duplicate" }]);
     expect(merged).toHaveLength(2);
+  });
+});
+
+describe("emailMatchesQuery", () => {
+  it("matches preset chips with related keywords", () => {
+    expect(emailMatchesQuery(sample[0], "Invoices")).toBe(true);
+    expect(emailMatchesQuery(sample[1], "Flight confirmation")).toBe(true);
+  });
+
+  it("rejects unrelated emails", () => {
+    expect(emailMatchesQuery(sample[1], "invoice")).toBe(false);
+    expect(emailMatchesQuery(sample[0], "flight")).toBe(false);
+  });
+});
+
+describe("mergeSearchResults", () => {
+  const junk = {
+    ...sample[1],
+    id: "junk",
+    subject: "Team lunch on Friday",
+    snippet: "Where should we go?",
+    senderName: "Coworker",
+    senderEmail: "coworker@company.com",
+  };
+
+  it("drops unrelated remote results after merge", () => {
+    const merged = mergeSearchResults("invoice", sample, [junk]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0].id).toBe("1");
+  });
+});
+
+describe("sanitizeRemoteSearchResults", () => {
+  const junk = {
+    ...sample[1],
+    id: "junk",
+    subject: "Random newsletter",
+    snippet: "Top stories this week",
+    senderName: "News",
+    senderEmail: "news@example.com",
+  };
+
+  it("filters polluted inbox dumps down to relevant matches", () => {
+    const polluted = [sample[0], junk, junk, junk, junk, junk];
+    const cleaned = sanitizeRemoteSearchResults(polluted, "invoice");
+    expect(cleaned).toHaveLength(1);
+    expect(cleaned[0].id).toBe("1");
+  });
+
+  it("keeps all results when every email matches", () => {
+    expect(sanitizeRemoteSearchResults([sample[0]], "invoice")).toHaveLength(1);
+  });
+
+  it("returns empty when nothing matches", () => {
+    expect(sanitizeRemoteSearchResults([sample[1]], "invoice")).toHaveLength(0);
+  });
+});
+
+describe("filterRelevantEmails", () => {
+  it("handles plural search terms", () => {
+    expect(filterRelevantEmails(sample, "invoices")).toHaveLength(1);
   });
 });

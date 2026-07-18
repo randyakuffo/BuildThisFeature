@@ -2,7 +2,12 @@ import { useState } from "react";
 import { Search } from "lucide-react";
 import type { GmailEmail } from "../types";
 import { searchEmails } from "../../lib/supabase";
-import { mergeEmailResults, searchCachedEmails, toGmailQuery } from "../../lib/search";
+import {
+  mergeSearchResults,
+  sanitizeRemoteSearchResults,
+  searchCachedEmails,
+  toGmailQuery,
+} from "../../lib/search";
 import { Card, PageHeader, Avatar } from "../components/primitives";
 
 export function SearchView({ emails }: { emails: GmailEmail[] }) {
@@ -29,8 +34,9 @@ export function SearchView({ emails }: { emails: GmailEmail[] }) {
     try {
       const gmailQuery = toGmailQuery(trimmed);
       const response = await searchEmails(gmailQuery);
-      const remoteResults = Array.isArray(response?.emails) ? response.emails : [];
-      const merged = mergeEmailResults(localResults, remoteResults);
+      const rawRemote = Array.isArray(response?.emails) ? response.emails : [];
+      const remoteResults = sanitizeRemoteSearchResults(rawRemote, trimmed);
+      const merged = mergeSearchResults(trimmed, localResults, remoteResults);
 
       setResults(merged);
       if (localResults.length > 0 && remoteResults.length > 0) {
