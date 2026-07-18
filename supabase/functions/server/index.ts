@@ -1,1 +1,2 @@
-index.tsx
+// CLI entrypoint shim — Supabase Functions deploy expects index.ts
+import "./index.tsx";
