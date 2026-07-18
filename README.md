@@ -1,6 +1,6 @@
-# InboxOS — AI Email Command Center
+# NudgeBox — Your inbox, gently nudged forward
 
-InboxOS is an AI-powered email command center that connects Gmail, classifies messages with Groq/Gemini, and surfaces actionable insights across dashboard views (action items, bills, follow-ups, security, and more).
+NudgeBox is an AI productivity layer for Gmail. It finds replies, deadlines, bills, and follow-ups hiding in your inbox—then gives you a clear plan to handle them across dashboard views (action items, bills, follow-ups, security, and more).
 
 Original Figma design: https://www.figma.com/design/IvYUNDCSwTwJH1eqHBFwpU/Build-this-feature
 

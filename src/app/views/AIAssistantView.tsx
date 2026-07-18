@@ -7,7 +7,7 @@ type ChatMessage = { role: "user" | "assistant"; text: string };
 export function AIAssistantView({ userId }: { userId: string }) {
   const [messages, setMessages] = useState<ChatMessage[]>([{
     role: "assistant",
-    text: "Hi! I'm your InboxOS AI. I have full context of your inbox — ask me anything about your emails, tasks, or what to prioritize.",
+    text: "Hi! I'm your NudgeBox AI. I have full context of your inbox — ask me anything about your emails, tasks, or what to prioritize.",
   }]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -49,7 +49,7 @@ export function AIAssistantView({ userId }: { userId: string }) {
             <Sparkles className="w-5 h-5 text-white" />
           </div>
           <div>
-            <h2 className="font-semibold text-gray-900 dark:text-white text-sm" style={{ fontFamily: "'Plus Jakarta Sans',sans-serif" }}>InboxOS AI</h2>
+            <h2 className="font-semibold text-gray-900 dark:text-white text-sm" style={{ fontFamily: "'Plus Jakarta Sans',sans-serif" }}>NudgeBox AI</h2>
             <div className="flex items-center gap-1.5">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
               <span className="text-[11px] text-gray-400 dark:text-slate-500">Live context · Your inbox</span>
