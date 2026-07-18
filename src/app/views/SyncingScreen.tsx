@@ -13,11 +13,11 @@ export function SyncingScreen({ email }: { email: string }) {
   return (
     <div className="min-h-screen bg-[#F8FAFC] dark:bg-[#0D0F1A] flex items-center justify-center">
       <div className="text-center max-w-sm">
-        <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-indigo-500 to-blue-600 flex items-center justify-center shadow-xl shadow-indigo-500/30 mx-auto mb-6">
+        <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center shadow-xl shadow-violet-500/30 mx-auto mb-6">
           <Sparkles className="w-8 h-8 text-white animate-pulse" />
         </div>
         <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-1" style={{ fontFamily: "'Plus Jakarta Sans',sans-serif" }}>
-          Setting up your inbox
+          Setting up NudgeBox
         </h2>
         <p className="text-sm text-gray-500 dark:text-slate-400 mb-8">{email}</p>
         <div className="space-y-2">

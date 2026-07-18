@@ -317,7 +317,7 @@ export function MainApp() {
         <div className="max-w-md text-center">
           <h2 className="text-xl font-bold text-gray-900 mb-2">Gmail could not be loaded</h2>
           <p className="text-sm text-gray-500 mb-5">
-            Your Google account is connected, but InboxOS could not reach the Gmail synchronization service.
+            Your Google account is connected, but NudgeBox could not reach the Gmail synchronization service.
           </p>
           <div className="flex justify-center gap-3">
             <button

@@ -24,13 +24,13 @@ export function Sidebar({
     >
       {/* Logo */}
       <div className={`flex items-center gap-3 px-4 h-14 border-b border-white/5 ${collapsed ? "justify-center" : ""}`}>
-        <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-indigo-500 to-blue-600 flex items-center justify-center flex-shrink-0 shadow-lg shadow-indigo-500/30">
+        <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center flex-shrink-0 shadow-lg shadow-violet-500/30">
           <Sparkles className="w-4 h-4 text-white" />
         </div>
         {!collapsed && (
           <div>
-            <span className="text-white font-semibold text-sm tracking-tight" style={{ fontFamily: "'Plus Jakarta Sans',sans-serif" }}>InboxOS</span>
-            <span className="block text-[10px] text-slate-500 leading-none">AI Command Center</span>
+            <span className="text-white font-semibold text-sm tracking-tight" style={{ fontFamily: "'Plus Jakarta Sans',sans-serif" }}>NudgeBox</span>
+            <span className="block text-[10px] text-slate-500 leading-none">Gentle email nudges</span>
           </div>
         )}
       </div>
