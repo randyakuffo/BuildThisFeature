@@ -26,7 +26,7 @@ function FloatingInboxArt() {
           <rect x="160" y="180" width="290" height="200" rx="18" fill="#FFFFFF" stroke="#0D3B36" strokeWidth="3" />
           <path d="M160 210 L305 318 L450 210" stroke="#0D3B36" strokeWidth="3" strokeLinejoin="round" />
           <circle cx="400" cy="250" r="28" fill="#FF5A5F" />
-          <path d="M400 236 V264 M386 250 H414" stroke="white" strokeWidth="4" strokeLinecap="round" />
+          <path d="M406 234 L390 252 H400 L394 266 L412 246 H401 Z" fill="white" />
           <rect x="192" y="328" width="140" height="12" rx="6" fill="#0D3B36" opacity="0.18" />
           <rect x="192" y="350" width="96" height="10" rx="5" fill="#0D3B36" opacity="0.12" />
         </g>
@@ -105,8 +105,9 @@ export function LoginScreen() {
           position: relative;
           overflow: hidden;
           background:
-            radial-gradient(1200px 700px at 85% 20%, rgba(184, 230, 0, 0.28), transparent 55%),
-            radial-gradient(900px 600px at 10% 80%, rgba(255, 90, 95, 0.16), transparent 50%),
+            radial-gradient(980px 620px at 88% 12%, rgba(184, 230, 0, 0.42), transparent 58%),
+            radial-gradient(820px 560px at 8% 88%, rgba(255, 90, 95, 0.22), transparent 52%),
+            radial-gradient(640px 420px at 42% 40%, rgba(45, 156, 142, 0.12), transparent 60%),
             linear-gradient(145deg, var(--mist) 0%, var(--sky) 48%, #F0FFF8 100%);
           color: var(--ink);
           font-family: var(--body);
@@ -187,24 +188,24 @@ export function LoginScreen() {
           align-items: center;
           justify-content: center;
           gap: 0.75rem;
-          min-height: 3.35rem;
-          padding: 0.85rem 1.35rem;
-          border: 2px solid var(--ink);
+          min-height: 3.5rem;
+          padding: 0.9rem 1.5rem;
+          border: 2.5px solid var(--ink);
           border-radius: 1rem;
-          background: var(--paper);
+          background: var(--citrus);
           color: var(--ink);
           font-family: var(--body);
           font-weight: 700;
-          font-size: 1rem;
+          font-size: 1.05rem;
           cursor: pointer;
           transition: transform 180ms ease, background 180ms ease, box-shadow 180ms ease;
-          box-shadow: 4px 4px 0 var(--ink);
+          box-shadow: 5px 5px 0 var(--ink);
         }
 
         .login-cta:hover:not(:disabled) {
           transform: translate(-2px, -2px);
-          background: var(--citrus);
-          box-shadow: 6px 6px 0 var(--ink);
+          background: #D4FF33;
+          box-shadow: 7px 7px 0 var(--ink);
         }
 
         .login-cta:active:not(:disabled) {
@@ -248,6 +249,7 @@ export function LoginScreen() {
           width: min(100%, 480px);
           margin-inline: auto;
           aspect-ratio: 1;
+          pointer-events: none;
           animation: login-rise 900ms 120ms cubic-bezier(0.22, 1, 0.36, 1) both;
         }
 
@@ -299,13 +301,15 @@ export function LoginScreen() {
           align-items: center;
           justify-content: space-between;
           gap: 0.75rem;
-          padding: 0.35rem 0;
+          padding: 0.65rem 0.15rem;
           border: 0;
           background: transparent;
           color: rgba(13, 59, 54, 0.55);
           font: inherit;
           font-size: 0.8rem;
           cursor: pointer;
+          position: relative;
+          z-index: 2;
         }
 
         .login-setup__toggle:hover {
