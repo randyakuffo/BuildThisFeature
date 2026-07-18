@@ -4,12 +4,14 @@ import {
   signOut,
   syncGmail,
   getCachedEmails,
+  getAttachments,
   getInsights,
   getDailyBrief,
   reclassifyEmails,
   repairAIData,
   storeGoogleTokens,
   type GoogleSessionTokens,
+  type VaultAttachment,
 } from "../lib/supabase";
 import { normalizeEmail } from "../lib/normalize";
 import type { View, AppState, Stats, DailyBrief, AIProcessingStatus, Insights } from "./types";
@@ -44,6 +46,8 @@ export function MainApp() {
   const [collapsed, setCollapsed] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [emails, setEmails] = useState<ReturnType<typeof normalizeEmail>[]>([]);
+  const [attachments, setAttachments] = useState<VaultAttachment[]>([]);
+  const [attachmentsLoading, setAttachmentsLoading] = useState(false);
   const [stats, setStats] = useState<Stats>({ total: 0, unread: 0, important: 0, needsReply: 0, byCategory: {} });
   const [insights, setInsights] = useState<Insights>(EMPTY_INSIGHTS);
   const [brief, setBrief] = useState<DailyBrief | null>(null);
@@ -82,6 +86,19 @@ export function MainApp() {
     }
   };
 
+  const loadAttachments = async (userId: string) => {
+    setAttachmentsLoading(true);
+    try {
+      const list = await getAttachments(userId);
+      setAttachments(list);
+    } catch (error) {
+      console.error("NudgeBox attachments load failed:", error);
+      setAttachments([]);
+    } finally {
+      setAttachmentsLoading(false);
+    }
+  };
+
   const syncInbox = async (userId: string, tokens?: ReturnType<typeof sessionTokens>) => {
     setSyncing(true);
     setAiStatus((s) => ({ ...s, classificationStatus: "running", insightsStatus: "running" }));
@@ -117,6 +134,7 @@ export function MainApp() {
       setStats(fresh.stats || { total: 0, unread: 0, important: 0, needsReply: 0, byCategory: {} });
       setLastSync(fresh.lastSync || new Date().toISOString());
       setInsights(loaded.insights);
+      void loadAttachments(userId);
 
       void loadBrief(userId);
       setAppState("ready");
@@ -142,6 +160,7 @@ export function MainApp() {
         setAppState("ready");
 
         void loadBrief(userId);
+        void loadAttachments(userId);
 
         const staleMs = 10 * 60 * 1000;
         if (!cached.lastSync || Date.now() - new Date(cached.lastSync).getTime() > staleMs) {
@@ -265,6 +284,7 @@ export function MainApp() {
     await signOut();
     setUser(null);
     setEmails([]);
+    setAttachments([]);
     setStats({ total: 0, unread: 0, important: 0, needsReply: 0, byCategory: {} });
     setInsights(EMPTY_INSIGHTS);
     setBrief(null);
@@ -273,6 +293,7 @@ export function MainApp() {
 
   const handleArchive = (id: string) => {
     setEmails((e) => e.filter((x) => x.id !== id));
+    setAttachments((items) => items.filter((item) => item.messageId !== id));
     setStats((s) => ({ ...s, total: s.total - 1 }));
   };
 
@@ -407,7 +428,9 @@ export function MainApp() {
               }}
             />
           )}
-          {view === "attachments" && <Views.AttachmentsView emails={emails} />}
+          {view === "attachments" && (
+            <Views.AttachmentsView attachments={attachments} loading={attachmentsLoading} />
+          )}
           {view === "automations" && (
             <Views.AutomationsView
               emails={emails}

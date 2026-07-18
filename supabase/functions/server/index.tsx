@@ -9,6 +9,7 @@ import {
   persistEnrichedInsights,
   persistHeuristicInsights,
 } from "./heuristics.tsx";
+import { extractAttachmentsFromPayload, type VaultAttachment } from "./attachments.tsx";
 
 const app = new Hono();
 const BASE = "/make-server-6ac207ec";
@@ -321,6 +322,9 @@ function stripHtml(html: string): string {
   return html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
 }
 
+const GMAIL_MESSAGE_FIELDS =
+  "id,threadId,labelIds,snippet,payload(mimeType,filename,headers,body/size,body/attachmentId,parts(mimeType,filename,headers,body/size,body/attachmentId,parts(mimeType,filename,body/size,body/attachmentId,parts(mimeType,filename,body/size,body/attachmentId))))";
+
 function parseMessage(msg: any) {
   const headers: any[] = msg.payload?.headers || [];
   const getH = (name: string) => headers.find((h: any) => h.name.toLowerCase() === name.toLowerCase())?.value || "";
@@ -349,27 +353,40 @@ function parseMessage(msg: any) {
   let hash = 0;
   for (let i = 0; i < senderEmail.length; i++) hash = senderEmail.charCodeAt(i) + ((hash << 5) - hash);
   const avatarBg = colors[Math.abs(hash) % colors.length];
+  const subject = getH("Subject") || "(no subject)";
+  const receivedAt = date.toISOString();
+  const attachments = extractAttachmentsFromPayload(msg.payload, {
+    messageId: msg.id,
+    threadId: msg.threadId,
+    senderName,
+    senderEmail,
+    subject,
+    receivedAt,
+  });
   return {
     id: msg.id, threadId: msg.threadId, senderName, senderEmail,
-    subject: getH("Subject") || "(no subject)", snippet: msg.snippet || "",
-    receivedAt: date.toISOString(), timeDisplay, isRead, isImportant, isStarred,
+    subject, snippet: msg.snippet || "",
+    receivedAt, timeDisplay, isRead, isImportant, isStarred,
     category, priority: isImportant ? "High" : "Medium",
     status: "Information", labels: msg.labelIds || [],
     initials, avatarBg, aiSummary: null,
     requiresReply: false, actionItems: [], dueDate: null, aiConfidence: 0,
     ai_version: null, ai_provider: null, ai_model: null, ai_processed_at: null,
+    attachments,
   };
+}
+
+async function fetchGmailMessageDetail(googleProviderToken: string, id: string) {
+  const url =
+    `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}` +
+    `?format=full&fields=${encodeURIComponent(GMAIL_MESSAGE_FIELDS)}`;
+  const r = await fetch(url, { headers: { Authorization: `Bearer ${googleProviderToken}` } });
+  return r.ok ? r.json() : null;
 }
 
 async function fetchGmailMessagesByIds(googleProviderToken: string, messageIds: string[]) {
   const detailed = await Promise.all(
-    messageIds.slice(0, 20).map(async (id) => {
-      const r = await fetch(
-        `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`,
-        { headers: { Authorization: `Bearer ${googleProviderToken}` } },
-      );
-      return r.ok ? r.json() : null;
-    }),
+    messageIds.slice(0, 20).map((id) => fetchGmailMessageDetail(googleProviderToken, id)),
   );
   return detailed.filter(Boolean).map(parseMessage);
 }
@@ -381,14 +398,23 @@ async function fetchGmailMessages(googleProviderToken: string, maxResults = MAX_
   );
   if (!listRes.ok) throw new Error(`Gmail list error: ${await listRes.text()}`);
   const { messages = [] } = await listRes.json();
-  const detailed = await Promise.all(messages.slice(0, MAX_EMAILS_PER_SYNC).map(async (msg: any) => {
-    const r = await fetch(
-      `https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`,
-      { headers: { Authorization: `Bearer ${googleProviderToken}` } }
-    );
-    return r.ok ? r.json() : null;
-  }));
+  const detailed = await Promise.all(
+    messages.slice(0, MAX_EMAILS_PER_SYNC).map((msg: any) => fetchGmailMessageDetail(googleProviderToken, msg.id)),
+  );
   return detailed.filter(Boolean).map(parseMessage);
+}
+
+function flattenEmailAttachments(emails: any[]): VaultAttachment[] {
+  const byId = new Map<string, VaultAttachment>();
+  for (const email of emails) {
+    const list = Array.isArray(email?.attachments) ? email.attachments : [];
+    for (const item of list) {
+      if (item?.id) byId.set(item.id, item as VaultAttachment);
+    }
+  }
+  return Array.from(byId.values()).sort(
+    (a, b) => new Date(b.receivedAt).getTime() - new Date(a.receivedAt).getTime(),
+  );
 }
 
 function extractBody(payload: any): string {
@@ -657,8 +683,15 @@ app.post(`${BASE}/gmail/sync`, async (c) => {
     const mergedEmails = emails.map((e) => {
       const prev = cachedById.get(e.id);
       if (prev?.ai_version === "v2") {
-        // Preserve AI classification; update Gmail metadata only
-        return { ...prev, isRead: e.isRead, isStarred: e.isStarred, labels: e.labels, timeDisplay: e.timeDisplay };
+        // Preserve AI classification; update Gmail metadata + attachment index
+        return {
+          ...prev,
+          isRead: e.isRead,
+          isStarred: e.isStarred,
+          labels: e.labels,
+          timeDisplay: e.timeDisplay,
+          attachments: Array.isArray(e.attachments) ? e.attachments : (prev.attachments || []),
+        };
       }
       return e;
     });
@@ -706,10 +739,24 @@ app.post(`${BASE}/gmail/sync`, async (c) => {
       }, {}),
     };
 
+    // Keep attachment metadata on classified emails for client fallbacks
+    const emailsWithAttachments = classifiedEmails.map((e: any) => {
+      const source = mergedEmails.find((m: any) => m.id === e.id);
+      return { ...e, attachments: source?.attachments || e.attachments || [] };
+    });
+    const finalAttachmentIndex = flattenEmailAttachments(emailsWithAttachments);
+
     await kv.mset(
-      [`emails:${trustedUserId}`, `stats:${trustedUserId}`, `last_sync:${trustedUserId}`],
-      [classifiedEmails, stats, new Date().toISOString()]
+      [
+        `emails:${trustedUserId}`,
+        `stats:${trustedUserId}`,
+        `last_sync:${trustedUserId}`,
+        `attachments:${trustedUserId}`,
+      ],
+      [emailsWithAttachments, stats, new Date().toISOString(), finalAttachmentIndex],
     );
+    // Use attachment-enriched list for the rest of the sync response path
+    classifiedEmails = emailsWithAttachments;
 
     let insightsStatus: "completed" | "failed" | "fallback" = "fallback";
     let insightsProvider: AIProviderName = "fallback";
@@ -727,6 +774,7 @@ app.post(`${BASE}/gmail/sync`, async (c) => {
     return c.json({
       success: true,
       count: classifiedEmails.length,
+      attachmentCount: finalAttachmentIndex.length,
       classification: {
         status: classificationStatus,
         provider: classificationProvider,
@@ -808,8 +856,70 @@ app.get(`${BASE}/emails/:userId`, async (c) => {
   if (authError || !user) return c.json({ error: authError || "Unauthorized." }, 401);
   const userId = c.req.param("userId");
   if (userId !== user.id) return c.json({ error: "User ID does not match authenticated session." }, 403);
-  const [emails, stats, lastSync] = await kv.mget([`emails:${userId}`, `stats:${userId}`, `last_sync:${userId}`]);
-  return c.json({ emails: emails || [], stats: stats || {}, lastSync });
+  const [emails, stats, lastSync, attachments] = await kv.mget([
+    `emails:${userId}`,
+    `stats:${userId}`,
+    `last_sync:${userId}`,
+    `attachments:${userId}`,
+  ]);
+  const emailList = asArray(emails);
+  const attachmentList = asArray(attachments).length
+    ? asArray(attachments)
+    : flattenEmailAttachments(emailList);
+  return c.json({
+    emails: emailList,
+    stats: stats || {},
+    lastSync,
+    attachments: attachmentList,
+  });
+});
+
+app.get(`${BASE}/attachments/:userId`, async (c) => {
+  const { user, error: authError } = await validateSupabaseUser(c.req.header("Authorization"));
+  if (authError || !user) return c.json({ error: authError || "Unauthorized." }, 401);
+  const userId = c.req.param("userId");
+  if (userId !== user.id) return c.json({ error: "User ID does not match authenticated session." }, 403);
+  const [attachments, emails] = await kv.mget([`attachments:${userId}`, `emails:${userId}`]);
+  const list = asArray(attachments).length
+    ? asArray(attachments)
+    : flattenEmailAttachments(asArray(emails));
+  return c.json({ attachments: list, count: list.length });
+});
+
+app.post(`${BASE}/gmail/attachment`, async (c) => {
+  try {
+    const { user, error: authError } = await validateSupabaseUser(c.req.header("Authorization"));
+    if (authError || !user) return c.json({ error: authError || "Unauthorized." }, 401);
+    const body = await c.req.json();
+    const messageId = asString(body.message_id || body.messageId);
+    const attachmentId = asString(body.attachment_id || body.attachmentId);
+    const filename = asString(body.filename, "download");
+    const mimeType = asString(body.mime_type || body.mimeType, "application/octet-stream");
+    if (!messageId || !attachmentId) {
+      return c.json({ error: "message_id and attachment_id are required." }, 400);
+    }
+
+    const googleProviderToken = await resolveGoogleAccessToken(user.id, body);
+    if (!googleProviderToken) return c.json({ error: "Google provider token is missing." }, 400);
+
+    const res = await fetch(
+      `https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}`,
+      { headers: { Authorization: `Bearer ${googleProviderToken}` } },
+    );
+    if (!res.ok) {
+      const detail = await res.text();
+      return c.json({ error: `Failed to fetch attachment: ${detail}` }, 502);
+    }
+    const data = await res.json();
+    return c.json({
+      filename,
+      mimeType,
+      size: asNumber(data.size),
+      data: asString(data.data),
+    });
+  } catch (e: any) {
+    return c.json({ error: e.message }, 500);
+  }
 });
 
 app.post(`${BASE}/gmail/message`, async (c) => {
@@ -840,7 +950,13 @@ app.post(`${BASE}/gmail/archive`, async (c) => {
     body: JSON.stringify({ removeLabelIds: ["INBOX"] }),
   });
   const emails: any[] = (await kv.get(`emails:${user.id}`)) || [];
-  await kv.set(`emails:${user.id}`, emails.filter((e: any) => e.id !== message_id));
+  const nextEmails = emails.filter((e: any) => e.id !== message_id);
+  await kv.set(`emails:${user.id}`, nextEmails);
+  const attachments: any[] = (await kv.get(`attachments:${user.id}`)) || [];
+  await kv.set(
+    `attachments:${user.id}`,
+    attachments.filter((a: any) => a.messageId !== message_id),
+  );
   return c.json({ success: true });
 });
 
