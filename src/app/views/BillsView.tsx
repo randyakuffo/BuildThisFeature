@@ -1,10 +1,12 @@
 import { CreditCard } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import type { Insights } from "../types";
+import { normalizeBill } from "../../lib/normalize";
 import { Card, PageHeader, EmptyInsights } from "../components/primitives";
 
 export function BillsView({ insights }: { insights: Insights }) {
-  const spendingData = (Array.isArray(insights.bills) ? insights.bills : []).map((b: any, i: number) => ({
+  const bills = (Array.isArray(insights.bills) ? insights.bills : []).map(normalizeBill);
+  const spendingData = bills.map((b) => ({
     name: (b.name || "").slice(0, 8),
     amount: Number(b.amount) || 0,
   }));
@@ -12,7 +14,7 @@ export function BillsView({ insights }: { insights: Insights }) {
   return (
     <div className="p-6 max-w-[1100px] mx-auto">
       <PageHeader title="Bills & Subscriptions" subtitle="Financial commitments detected from your inbox" />
-      {insights.bills.length === 0 ? (
+      {bills.length === 0 ? (
         <EmptyInsights icon={CreditCard} label="No bills detected yet. Sync your inbox to find financial emails." />
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
@@ -22,14 +24,16 @@ export function BillsView({ insights }: { insights: Insights }) {
                 <h3 className="font-semibold text-sm text-gray-900 dark:text-white" style={{ fontFamily: "'Plus Jakarta Sans',sans-serif" }}>Detected Bills</h3>
               </div>
               <div className="divide-y divide-gray-50 dark:divide-white/[0.03]">
-                {insights.bills.map((bill: any, i: number) => (
-                  <div key={i} className="flex items-center gap-4 px-5 py-4">
+                {bills.map((bill, i) => {
+                  const meta = [bill.category, bill.due ? `Due ${bill.due}` : null].filter(Boolean).join(" · ");
+                  return (
+                  <div key={bill.emailId || i} className="flex items-center gap-4 px-5 py-4">
                     <div className="w-9 h-9 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 flex items-center justify-center flex-shrink-0">
                       <CreditCard className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-gray-900 dark:text-white">{bill.name}</p>
-                      <p className="text-xs text-gray-400 dark:text-slate-500">{bill.category} · Due {bill.due}</p>
+                      {meta ? <p className="text-xs text-gray-400 dark:text-slate-500">{meta}</p> : null}
                     </div>
                     <span className={`text-sm font-bold ${bill.status === "overdue" ? "text-red-600 dark:text-red-400" : "text-gray-900 dark:text-white"}`}>
                       ${Number(bill.amount || 0).toFixed(2)}
@@ -42,7 +46,8 @@ export function BillsView({ insights }: { insights: Insights }) {
                       <button className="text-xs bg-indigo-600 text-white px-3 py-1.5 rounded-lg hover:bg-indigo-700 transition-colors">Pay</button>
                     )}
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </Card>
           </div>

@@ -9,7 +9,19 @@ export {
   type Insights,
 } from "./normalize";
 
+export {
+  normalizeAttachmentsResponse,
+  flattenAttachmentsFromEmails,
+  type VaultAttachment,
+} from "./attachments";
+
 import { normalizeInsightsResponse, normalizeBriefResponse } from "./normalize";
+import {
+  attachmentDataToBlob,
+  flattenAttachmentsFromEmails,
+  normalizeAttachmentsResponse,
+  type VaultAttachment,
+} from "./attachments";
 
 export const supabase = createClient(
   `https://${projectId}.supabase.co`,
@@ -242,6 +254,59 @@ export async function getCachedEmails(userId: string) {
   const headers = await getAuthHeaders();
   const res = await fetch(`${SERVER}/emails/${userId}`, { headers });
   return res.json();
+}
+
+export async function getAttachments(userId: string): Promise<VaultAttachment[]> {
+  const headers = await getAuthHeaders();
+  try {
+    const res = await fetch(`${SERVER}/attachments/${userId}`, { headers });
+    if (res.ok) {
+      const raw = await res.json().catch(() => ({}));
+      const list = normalizeAttachmentsResponse(raw);
+      if (list.length) return list;
+    }
+  } catch (error) {
+    console.warn("NudgeBox attachments endpoint unavailable:", error);
+  }
+
+  // Fallback: nested attachment metadata on cached emails (or emails endpoint payload)
+  const cached = await getCachedEmails(userId);
+  const fromEndpoint = normalizeAttachmentsResponse(cached);
+  if (fromEndpoint.length) return fromEndpoint;
+  return flattenAttachmentsFromEmails(Array.isArray(cached?.emails) ? cached.emails : []);
+}
+
+export async function downloadAttachment(attachment: VaultAttachment) {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${SERVER}/gmail/attachment`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(
+      await gmailRequestBody({
+        message_id: attachment.messageId,
+        attachment_id: attachment.attachmentId,
+        filename: attachment.filename,
+        mime_type: attachment.mimeType,
+      }),
+    ),
+  });
+  const result = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new Error(result?.error || `Attachment download failed with status ${res.status}.`);
+  }
+  const data = typeof result?.data === "string" ? result.data : "";
+  if (!data) throw new Error("Attachment payload was empty.");
+
+  const blob = attachmentDataToBlob(data, result.mimeType || attachment.mimeType);
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = result.filename || attachment.filename || "download";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+  return { success: true, filename: anchor.download };
 }
 
 export async function getInsights(userId: string) {

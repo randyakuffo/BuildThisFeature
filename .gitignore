@@ -1,3 +1,5 @@
 node_modules/
 dist/
 .pnpm-store/
+supabase/.temp/
+supabase/functions/make-server-6ac207ec

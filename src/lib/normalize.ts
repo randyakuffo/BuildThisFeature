@@ -77,6 +77,55 @@ export function normalizeEmail(raw: unknown): GmailEmail {
   };
 }
 
+function pickString(raw: Record<string, unknown>, keys: string[], fallback = ""): string {
+  for (const key of keys) {
+    const value = raw[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return fallback;
+}
+
+function pickAmount(raw: Record<string, unknown>): number | null {
+  for (const key of ["amount", "total", "price", "cost"]) {
+    const value = raw[key];
+    if (value == null || value === "") continue;
+    const num = Number(value);
+    if (Number.isFinite(num)) return num;
+  }
+  return null;
+}
+
+/** Normalize sparse/variant AI purchase objects into a stable UI shape. */
+export function normalizePurchase(raw: unknown) {
+  const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const item = pickString(r, ["item", "name", "title", "product", "description", "subject"], "Purchase");
+  const from = pickString(r, ["from", "merchant", "seller", "vendor", "store", "brand"]);
+  const date = pickString(r, ["date", "orderDate", "orderedAt", "ordered_at", "purchaseDate"]);
+  const status = pickString(r, ["status", "state"], "unknown").toLowerCase();
+  const emailId = pickString(r, ["emailId", "email_id"]);
+  return {
+    item,
+    from,
+    amount: pickAmount(r),
+    date: date || null,
+    status,
+    emailId: emailId || null,
+  };
+}
+
+/** Normalize sparse/variant AI bill objects into a stable UI shape. */
+export function normalizeBill(raw: unknown) {
+  const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  return {
+    name: pickString(r, ["name", "title", "merchant", "from", "vendor"], "Bill"),
+    amount: pickAmount(r) ?? 0,
+    due: pickString(r, ["due", "dueDate", "due_date", "date"]) || null,
+    category: pickString(r, ["category", "type"], "Other"),
+    status: pickString(r, ["status"], "unknown").toLowerCase(),
+    emailId: pickString(r, ["emailId", "email_id"]) || null,
+  };
+}
+
 export function normalizeInsightsResponse(raw: unknown) {
   const source = (raw as Record<string, unknown>)?.insights
     ?? (raw as Record<string, unknown>)?.data
@@ -91,11 +140,11 @@ export function normalizeInsightsResponse(raw: unknown) {
   return {
     actionItems: safeArray(src.actionItems ?? src.action_items),
     waitingOn: safeArray(src.waitingOn ?? src.waiting_on),
-    bills: safeArray(src.bills),
+    bills: safeArray(src.bills).map(normalizeBill),
     followUps: safeArray(src.followUps ?? src.follow_ups),
     calendar: safeArray(src.calendar),
     security: safeArray(src.security),
-    purchases: safeArray(src.purchases),
+    purchases: safeArray(src.purchases).map(normalizePurchase),
     brief: {
       summary: typeof briefSource.summary === "string" ? briefSource.summary : "",
       highlights: safeArray<string>(briefSource.highlights).filter((item): item is string => typeof item === "string"),
