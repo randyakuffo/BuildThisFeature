@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
 import { Sparkles, CheckCircle2 } from "lucide-react";
 import type { GmailEmail } from "../types";
-import { archiveEmail } from "../../lib/supabase";
+import { archiveEmail, supabase } from "../../lib/supabase";
 import { Card, PageHeader } from "../components/primitives";
 import {
+  dismissSuggestion,
   enableSuggestionRule,
   loadAutomationRules,
+  loadDismissedSuggestions,
   toggleRule,
   type AutomationRule,
 } from "../../lib/automations";
@@ -23,11 +25,32 @@ export function AutomationsView({
   const [rules, setRules] = useState<AutomationRule[]>([]);
   const [message, setMessage] = useState("");
   const [running, setRunning] = useState(false);
+  const [resolvedUserId, setResolvedUserId] = useState(userId);
   const emailArr = emails || [];
 
   useEffect(() => {
-    if (userId) setRules(loadAutomationRules(userId));
+    if (userId) {
+      setResolvedUserId(userId);
+      return;
+    }
+
+    let mounted = true;
+    void supabase.auth.getSession().then(({ data }) => {
+      if (!mounted) return;
+      const id = data.session?.user?.id;
+      if (id) setResolvedUserId(id);
+    });
+
+    return () => {
+      mounted = false;
+    };
   }, [userId]);
+
+  useEffect(() => {
+    if (!resolvedUserId) return;
+    setRules(loadAutomationRules(resolvedUserId));
+    setDismissed(new Set(loadDismissedSuggestions(resolvedUserId)));
+  }, [resolvedUserId]);
 
   const newsletterCount = emailArr.filter((e) => e.category === "Newsletter").length;
   const workCount = emailArr.filter((e) => e.category === "Work").length;
@@ -50,9 +73,14 @@ export function AutomationsView({
   ].filter(Boolean).filter((s) => !dismissed.has(s!.id)) as Array<{ id: string; text: string; action: string }>;
 
   const handleEnableSuggestion = async (suggestion: { id: string; action: string }) => {
-    const next = enableSuggestionRule(userId, suggestion.id, suggestion.action, suggestion.action);
+    if (!resolvedUserId) {
+      setMessage("Sign in to enable automations.");
+      return;
+    }
+
+    const next = enableSuggestionRule(resolvedUserId, suggestion.id, suggestion.action, suggestion.action);
     setRules(next);
-    setDismissed((d) => new Set([...d, suggestion.id]));
+    setDismissed(new Set(loadDismissedSuggestions(resolvedUserId)));
     setMessage(`Enabled: ${suggestion.action}`);
 
     if (suggestion.id === "newsletters") {
@@ -78,10 +106,21 @@ export function AutomationsView({
   };
 
   const handleToggleRule = (ruleId: string) => {
-    const next = toggleRule(userId, ruleId);
+    if (!resolvedUserId) {
+      setMessage("Sign in to manage automations.");
+      return;
+    }
+
+    const next = toggleRule(resolvedUserId, ruleId);
     setRules(next);
     const rule = next.find((r) => r.id === ruleId);
     setMessage(rule ? `${rule.name} is now ${rule.active ? "active" : "paused"}.` : "");
+  };
+
+  const handleDismissSuggestion = (suggestionId: string) => {
+    if (!resolvedUserId) return;
+    const next = dismissSuggestion(resolvedUserId, suggestionId);
+    setDismissed(new Set(next));
   };
 
   return (
@@ -112,7 +151,7 @@ export function AutomationsView({
                     {running && s.id === "newsletters" ? "Running…" : s.action}
                   </button>
                   <button
-                    onClick={() => setDismissed((d) => new Set([...d, s.id]))}
+                    onClick={() => handleDismissSuggestion(s.id)}
                     className="text-[10px] text-gray-400 dark:text-slate-500 hover:text-gray-600 dark:hover:text-slate-300 px-2 py-1 transition-colors"
                   >
                     Dismiss

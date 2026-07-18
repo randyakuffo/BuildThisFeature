@@ -38,26 +38,112 @@ const SUGGESTION_RULE_MAP: Record<string, string> = {
   work: "priority-hours",
 };
 
+const SUGGESTION_LABELS: Record<string, { name: string; trigger: string; action: string }> = {
+  "morning-digest": {
+    name: "Morning Digest",
+    trigger: "Unread important emails each morning",
+    action: "Send daily digest summary",
+  },
+  "priority-hours": {
+    name: "Priority Hours",
+    trigger: "Work emails during business hours",
+    action: "Boost work email priority 9am–5pm",
+  },
+};
+
 export function storageKey(userId: string) {
   return `inboxos-automations:${userId}`;
 }
 
-export function loadAutomationRules(userId: string): AutomationRule[] {
+export function dismissedStorageKey(userId: string) {
+  return `inboxos-automations-dismissed:${userId}`;
+}
+
+function readJson<T>(key: string): T | null {
   try {
-    const raw = localStorage.getItem(storageKey(userId));
-    if (!raw) return DEFAULT_RULES.map((r) => ({ ...r }));
-    const parsed = JSON.parse(raw) as AutomationRule[];
-    if (!Array.isArray(parsed) || parsed.length === 0) {
-      return DEFAULT_RULES.map((r) => ({ ...r }));
-    }
-    return parsed;
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    return JSON.parse(raw) as T;
   } catch {
-    return DEFAULT_RULES.map((r) => ({ ...r }));
+    return null;
   }
 }
 
+function writeJson(key: string, value: unknown) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch (error) {
+    console.error("InboxOS automation persistence failed:", error);
+  }
+}
+
+export function mergeAutomationRules(saved: AutomationRule[]): AutomationRule[] {
+  const savedById = new Map(saved.map((rule) => [rule.id, rule]));
+  const merged = DEFAULT_RULES.map((defaults) => {
+    const stored = savedById.get(defaults.id);
+    if (!stored) return { ...defaults };
+    return {
+      ...defaults,
+      ...stored,
+      name: defaults.name,
+      trigger: defaults.trigger,
+      action: defaults.action,
+      active: Boolean(stored.active),
+    };
+  });
+
+  for (const rule of saved) {
+    if (DEFAULT_RULES.some((defaults) => defaults.id === rule.id)) continue;
+    const template = SUGGESTION_LABELS[rule.id];
+    merged.push({
+      id: rule.id,
+      name: template?.name || rule.name,
+      trigger: template?.trigger || rule.trigger,
+      action: template?.action || rule.action,
+      active: Boolean(rule.active),
+      enabledAt: rule.enabledAt,
+    });
+  }
+
+  return merged;
+}
+
+export function loadAutomationRules(userId: string): AutomationRule[] {
+  if (!userId) return DEFAULT_RULES.map((rule) => ({ ...rule }));
+
+  const parsed = readJson<AutomationRule[]>(storageKey(userId));
+  if (!Array.isArray(parsed)) {
+    return DEFAULT_RULES.map((rule) => ({ ...rule }));
+  }
+
+  return mergeAutomationRules(parsed);
+}
+
 export function saveAutomationRules(userId: string, rules: AutomationRule[]) {
-  localStorage.setItem(storageKey(userId), JSON.stringify(rules));
+  if (!userId) {
+    console.warn("InboxOS automations: skipped save because user id is missing.");
+    return;
+  }
+  writeJson(storageKey(userId), rules);
+}
+
+export function loadDismissedSuggestions(userId: string): string[] {
+  if (!userId) return [];
+  const parsed = readJson<string[]>(dismissedStorageKey(userId));
+  return Array.isArray(parsed) ? parsed.filter((id) => typeof id === "string") : [];
+}
+
+export function saveDismissedSuggestions(userId: string, dismissed: Iterable<string>) {
+  if (!userId) return;
+  writeJson(dismissedStorageKey(userId), [...dismissed]);
+}
+
+export function dismissSuggestion(userId: string, suggestionId: string): string[] {
+  const dismissed = new Set(loadDismissedSuggestions(userId));
+  dismissed.add(suggestionId);
+  const next = [...dismissed];
+  saveDismissedSuggestions(userId, next);
+  return next;
 }
 
 export function enableSuggestionRule(
@@ -66,32 +152,39 @@ export function enableSuggestionRule(
   label: string,
   action: string,
 ): AutomationRule[] {
+  if (!userId) return DEFAULT_RULES.map((rule) => ({ ...rule }));
+
   const rules = loadAutomationRules(userId);
   const mappedId = SUGGESTION_RULE_MAP[suggestionId] ?? `custom-${suggestionId}`;
-  const existing = rules.find((r) => r.id === mappedId);
+  const existing = rules.find((rule) => rule.id === mappedId);
+  const now = new Date().toISOString();
 
   if (existing) {
     existing.active = true;
-    existing.enabledAt = new Date().toISOString();
+    existing.enabledAt = now;
   } else {
+    const template = SUGGESTION_LABELS[mappedId];
     rules.push({
       id: mappedId,
-      name: label,
-      trigger: `AI suggestion: ${suggestionId}`,
-      action,
+      name: template?.name || label,
+      trigger: template?.trigger || `AI suggestion: ${suggestionId}`,
+      action: template?.action || action,
       active: true,
-      enabledAt: new Date().toISOString(),
+      enabledAt: now,
     });
   }
 
   saveAutomationRules(userId, rules);
+  dismissSuggestion(userId, suggestionId);
   return rules;
 }
 
 export function toggleRule(userId: string, ruleId: string): AutomationRule[] {
+  if (!userId) return DEFAULT_RULES.map((rule) => ({ ...rule }));
+
   const rules = loadAutomationRules(userId);
-  const next = rules.map((r) =>
-    r.id === ruleId ? { ...r, active: !r.active } : r,
+  const next = rules.map((rule) =>
+    rule.id === ruleId ? { ...rule, active: !rule.active } : rule,
   );
   saveAutomationRules(userId, next);
   return next;
