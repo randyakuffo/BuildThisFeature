@@ -125,7 +125,7 @@ export function AttachmentsView({
       ) : attachments.length === 0 ? (
         <EmptyInsights
           icon={Paperclip}
-          label="No attachments found yet. Sync your inbox to index PDFs, receipts, and documents from Gmail."
+          label="No attachments found yet. Click Sync Inbox to scan Gmail for PDFs, receipts, and documents. If you just updated the server, sync once more to rebuild the vault."
         />
       ) : (
         <>

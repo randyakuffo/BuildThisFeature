@@ -3,6 +3,8 @@ import {
   normalizeEmail,
   normalizeInsightsResponse,
   normalizeBriefResponse,
+  normalizePurchase,
+  normalizeBill,
 } from "./normalize";
 
 describe("normalizeEmail", () => {
@@ -46,6 +48,39 @@ describe("normalizeInsightsResponse", () => {
     const result = normalizeInsightsResponse(null);
     expect(result.actionItems).toEqual([]);
     expect(result.brief.highlights).toEqual([]);
+  });
+});
+
+describe("normalizePurchase", () => {
+  it("fills missing item from alternate keys", () => {
+    const result = normalizePurchase({
+      from: "Google",
+      merchant: "Google",
+      title: "Google One renewal",
+      total: "12.99",
+    });
+    expect(result.item).toBe("Google One renewal");
+    expect(result.from).toBe("Google");
+    expect(result.amount).toBe(12.99);
+  });
+
+  it("defaults empty purchase titles", () => {
+    const result = normalizePurchase({ from: "Public" });
+    expect(result.item).toBe("Purchase");
+    expect(result.from).toBe("Public");
+  });
+});
+
+describe("normalizeBill", () => {
+  it("accepts merchant/dueDate variants", () => {
+    const result = normalizeBill({
+      merchant: "Stripe",
+      dueDate: "2026-07-20",
+      price: 40,
+    });
+    expect(result.name).toBe("Stripe");
+    expect(result.due).toBe("2026-07-20");
+    expect(result.amount).toBe(40);
   });
 });
 

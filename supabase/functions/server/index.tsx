@@ -322,9 +322,6 @@ function stripHtml(html: string): string {
   return html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
 }
 
-const GMAIL_MESSAGE_FIELDS =
-  "id,threadId,labelIds,snippet,payload(mimeType,filename,headers,body/size,body/attachmentId,parts(mimeType,filename,headers,body/size,body/attachmentId,parts(mimeType,filename,body/size,body/attachmentId,parts(mimeType,filename,body/size,body/attachmentId))))";
-
 function parseMessage(msg: any) {
   const headers: any[] = msg.payload?.headers || [];
   const getH = (name: string) => headers.find((h: any) => h.name.toLowerCase() === name.toLowerCase())?.value || "";
@@ -377,11 +374,30 @@ function parseMessage(msg: any) {
 }
 
 async function fetchGmailMessageDetail(googleProviderToken: string, id: string) {
-  const url =
-    `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}` +
-    `?format=full&fields=${encodeURIComponent(GMAIL_MESSAGE_FIELDS)}`;
+  // Use full format without a fields mask — restrictive field projections were
+  // dropping nested MIME parts / attachmentIds, leaving the vault empty.
+  const url = `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}?format=full`;
   const r = await fetch(url, { headers: { Authorization: `Bearer ${googleProviderToken}` } });
   return r.ok ? r.json() : null;
+}
+
+async function listGmailMessageIds(
+  googleProviderToken: string,
+  query: { maxResults: number; labelIds?: string; q?: string },
+): Promise<string[]> {
+  const params = new URLSearchParams({
+    maxResults: String(query.maxResults),
+    includeSpamTrash: "false",
+  });
+  if (query.labelIds) params.set("labelIds", query.labelIds);
+  if (query.q) params.set("q", query.q);
+  const listRes = await fetch(
+    `https://gmail.googleapis.com/gmail/v1/users/me/messages?${params}`,
+    { headers: { Authorization: `Bearer ${googleProviderToken}` } },
+  );
+  if (!listRes.ok) throw new Error(`Gmail list error: ${await listRes.text()}`);
+  const { messages = [] } = await listRes.json();
+  return messages.map((m: any) => m.id).filter(Boolean);
 }
 
 async function fetchGmailMessagesByIds(googleProviderToken: string, messageIds: string[]) {
@@ -392,14 +408,34 @@ async function fetchGmailMessagesByIds(googleProviderToken: string, messageIds: 
 }
 
 async function fetchGmailMessages(googleProviderToken: string, maxResults = MAX_EMAILS_PER_SYNC) {
-  const listRes = await fetch(
-    `https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=${maxResults}&labelIds=INBOX&includeSpamTrash=false`,
-    { headers: { Authorization: `Bearer ${googleProviderToken}` } }
-  );
-  if (!listRes.ok) throw new Error(`Gmail list error: ${await listRes.text()}`);
-  const { messages = [] } = await listRes.json();
+  const inboxIds = await listGmailMessageIds(googleProviderToken, {
+    maxResults,
+    labelIds: "INBOX",
+  });
+
+  // Also pull recent messages that definitely have files (may be outside the
+  // first inbox page) so Attachment Vault isn't empty after sync.
+  let attachmentIds: string[] = [];
+  try {
+    attachmentIds = await listGmailMessageIds(googleProviderToken, {
+      maxResults: Math.min(40, maxResults),
+      q: "has:attachment",
+    });
+  } catch (error) {
+    console.warn("InboxOS attachment list query failed:", error);
+  }
+
+  const orderedIds: string[] = [];
+  const seen = new Set<string>();
+  for (const id of [...inboxIds, ...attachmentIds]) {
+    if (seen.has(id)) continue;
+    seen.add(id);
+    orderedIds.push(id);
+    if (orderedIds.length >= maxResults + 20) break;
+  }
+
   const detailed = await Promise.all(
-    messages.slice(0, MAX_EMAILS_PER_SYNC).map((msg: any) => fetchGmailMessageDetail(googleProviderToken, msg.id)),
+    orderedIds.map((id) => fetchGmailMessageDetail(googleProviderToken, id)),
   );
   return detailed.filter(Boolean).map(parseMessage);
 }

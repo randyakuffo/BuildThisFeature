@@ -73,14 +73,25 @@ export function extractAttachmentsFromPayload(
   const found: VaultAttachment[] = [];
 
   walkParts(payload, (part) => {
-    const filename = typeof part?.filename === "string" ? part.filename.trim() : "";
     const mimeType = typeof part?.mimeType === "string" ? part.mimeType : "application/octet-stream";
     const attachmentId = typeof part?.body?.attachmentId === "string" ? part.body.attachmentId : "";
     const size = Number(part?.body?.size) || 0;
+    let filename = typeof part?.filename === "string" ? part.filename.trim() : "";
 
-    if (!filename || !attachmentId) return;
+    if (!attachmentId) return;
     if (mimeType.startsWith("multipart/")) return;
-    // Skip tiny nameless-looking signature images under 5KB
+    if (mimeType.startsWith("text/") && !filename) return;
+
+    if (!filename) {
+      const ext =
+        mimeType === "application/pdf" ? "pdf"
+          : mimeType.startsWith("image/") ? (mimeType.split("/")[1] || "img")
+            : mimeType.includes("spreadsheet") || mimeType.includes("excel") ? "xlsx"
+              : "bin";
+      filename = `attachment.${ext}`;
+    }
+
+    // Skip tiny signature-style images under 5KB
     if (mimeType.startsWith("image/") && size > 0 && size < 5_000 && /^image\d*\./i.test(filename)) {
       return;
     }
