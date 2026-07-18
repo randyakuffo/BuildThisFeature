@@ -20,6 +20,16 @@ pnpm dev
 
 Open the URL printed by Vite (typically http://localhost:5173).
 
+If the page does not load in Cursor or a remote environment, the dev server must bind to all interfaces (`vite --host`, already configured). Use the **Ports** panel in Cursor to forward port `5173`, or run `pnpm dev` locally on your machine.
+
+### Supabase Auth redirect (required for Google login)
+
+Add this URL in **Supabase → Authentication → URL Configuration → Redirect URLs**:
+
+```
+http://localhost:5173/
+```
+
 ## Scripts
 
 | Command | Description |
@@ -41,7 +51,7 @@ Set these in **Supabase → Edge Functions → Secrets** (or Figma Make Settings
 | `GEMINI_API_KEY` | One of Groq/Gemini | Insights, chat, daily brief |
 | `GOOGLE_CLIENT_ID` | For token refresh | Same client ID as Supabase Google OAuth |
 | `GOOGLE_CLIENT_SECRET` | For token refresh | Google OAuth client secret |
-| `ALLOWED_ORIGINS` | Production | Comma-separated CORS origins, e.g. `https://app.example.com,http://localhost:5173` |
+| `ALLOWED_ORIGINS` | Production | Comma-separated CORS origins — **must include** `http://localhost:5173` for local dev |
 
 `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY` are provided automatically in the Edge Function runtime.
 
