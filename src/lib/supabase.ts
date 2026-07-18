@@ -1,75 +1,15 @@
 import { createClient } from "@supabase/supabase-js";
 import { projectId, publicAnonKey } from "../../utils/supabase/info";
 
-// ── Safe response normalizers ─────────────────────────────────────────────────
+export {
+  normalizeEmail,
+  normalizeInsightsResponse,
+  normalizeBriefResponse,
+  type GmailEmail,
+  type Insights,
+} from "./normalize";
 
-const safeArray = <T,>(value: unknown): T[] => Array.isArray(value) ? value as T[] : [];
-
-export function normalizeInsightsResponse(raw: any) {
-  const source = raw?.insights ?? raw?.data?.insights ?? raw ?? {};
-  const briefSource = source.brief && typeof source.brief === "object" && !Array.isArray(source.brief)
-    ? source.brief
-    : {};
-  return {
-    actionItems: safeArray(source.actionItems ?? source.action_items),
-    waitingOn: safeArray(source.waitingOn ?? source.waiting_on),
-    bills: safeArray(source.bills),
-    followUps: safeArray(source.followUps ?? source.follow_ups),
-    calendar: safeArray(source.calendar),
-    security: safeArray(source.security),
-    purchases: safeArray(source.purchases),
-    brief: {
-      summary: typeof briefSource.summary === "string" ? briefSource.summary : "",
-      highlights: safeArray<string>(briefSource.highlights).filter((item): item is string => typeof item === "string"),
-    },
-  };
-}
-
-const safeStringArray = (value: unknown): string[] => {
-  if (Array.isArray(value)) {
-    return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
-  }
-  if (typeof value === "string" && value.trim()) {
-    return [value.trim()];
-  }
-  return [];
-};
-
-export function normalizeBriefResponse(raw: any) {
-  const source =
-    raw?.brief ??
-    raw?.dailyBrief ??
-    raw?.daily_brief ??
-    raw?.data?.brief ??
-    raw?.data ??
-    raw ??
-    {};
-
-  if (Array.isArray(source)) {
-    return { summary: "", highlights: safeStringArray(source) };
-  }
-
-  if (typeof source === "string") {
-    return { summary: source, highlights: [] };
-  }
-
-  const summary =
-    typeof source?.summary === "string"
-      ? source.summary
-      : typeof source?.text === "string"
-        ? source.text
-        : "";
-
-  const highlights = safeStringArray(
-    source?.highlights ??
-    source?.highlight ??
-    source?.items ??
-    source?.bullets ??
-    source?.key_points
-  );
-
-  return { summary, highlights };
-}
+import { normalizeInsightsResponse, normalizeBriefResponse } from "./normalize";
 
 export const supabase = createClient(
   `https://${projectId}.supabase.co`,
@@ -92,14 +32,6 @@ export const SERVER = `https://${projectId}.supabase.co/functions/v1/make-server
 
 export async function signInWithGoogle() {
   const redirectTo = `${window.location.origin}/`;
-
-  try {
-    localStorage.setItem("inboxos-storage-test", "working");
-    console.log("InboxOS localStorage test:", localStorage.getItem("inboxos-storage-test"));
-    localStorage.removeItem("inboxos-storage-test");
-  } catch (error) {
-    console.error("InboxOS localStorage unavailable:", error);
-  }
 
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: "google",
@@ -128,7 +60,25 @@ export async function signInWithGoogle() {
   return data;
 }
 
+export async function clearGoogleTokens() {
+  const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+  if (sessionError) throw sessionError;
+  if (!session?.access_token) return;
+
+  await fetch(`${SERVER}/gmail/tokens`, {
+    method: "DELETE",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${session.access_token}`,
+      apikey: publicAnonKey,
+    },
+  }).catch((error) => {
+    console.error("InboxOS clear Google tokens failed:", error);
+  });
+}
+
 export async function signOut() {
+  await clearGoogleTokens();
   await supabase.auth.signOut();
 }
 
@@ -145,44 +95,74 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
   if (!session?.access_token) throw new Error("No Supabase session access token is available.");
   return {
     "Content-Type": "application/json",
-    "Authorization": `Bearer ${session.access_token}`,
-    "apikey": publicAnonKey,
+    Authorization: `Bearer ${session.access_token}`,
+    apikey: publicAnonKey,
   };
 }
 
 // ── Gmail API via backend ─────────────────────────────────────────────────────
 
-export async function syncGmail(googleProviderToken: string, userId: string) {
-  if (!googleProviderToken) throw new Error("No Google provider token is available.");
+export interface GoogleSessionTokens {
+  googleProviderToken?: string;
+  googleProviderRefreshToken?: string | null;
+}
 
+export async function storeGoogleTokens(
+  googleProviderToken: string,
+  googleProviderRefreshToken?: string | null,
+) {
+  const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+  if (sessionError) throw sessionError;
+  if (!session?.access_token) throw new Error("No Supabase session access token is available.");
+  if (!session.user?.id) throw new Error("No authenticated user is available.");
+
+  const response = await fetch(`${SERVER}/gmail/store-tokens`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${session.access_token}`,
+      apikey: publicAnonKey,
+    },
+    body: JSON.stringify({
+      userId: session.user.id,
+      googleProviderToken,
+      googleProviderRefreshToken: googleProviderRefreshToken ?? undefined,
+    }),
+  });
+
+  const result = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new Error(result?.error || result?.message || `Store Google tokens failed with status ${response.status}.`);
+  }
+  return result;
+}
+
+export async function syncGmail(userId: string, tokens?: GoogleSessionTokens) {
   const { data: { session }, error: sessionError } = await supabase.auth.getSession();
   if (sessionError) throw sessionError;
   if (!session?.access_token) throw new Error("No Supabase session access token is available.");
 
-  console.log("InboxOS Gmail sync credentials:", {
-    hasSupabaseSessionToken: Boolean(session.access_token),
-    hasGoogleProviderToken: Boolean(googleProviderToken),
-    userIdAvailable: Boolean(userId),
-  });
+  const body: Record<string, string> = { userId };
+  if (tokens?.googleProviderToken) {
+    body.googleProviderToken = tokens.googleProviderToken;
+  }
+  if (tokens?.googleProviderRefreshToken) {
+    body.googleProviderRefreshToken = tokens.googleProviderRefreshToken;
+  }
 
   const response = await fetch(`${SERVER}/gmail/sync`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "Authorization": `Bearer ${session.access_token}`,
-      "apikey": publicAnonKey,
+      Authorization: `Bearer ${session.access_token}`,
+      apikey: publicAnonKey,
     },
-    body: JSON.stringify({ userId, googleProviderToken }),
+    body: JSON.stringify(body),
   });
 
   const result = await response.json().catch(() => null);
 
   if (!response.ok) {
-    console.error("InboxOS Gmail sync HTTP failure:", {
-      status: response.status,
-      statusText: response.statusText,
-      result,
-    });
     throw new Error(result?.error || result?.message || `Gmail sync failed with status ${response.status}.`);
   }
 
@@ -199,18 +179,7 @@ export async function getInsights(userId: string) {
   const headers = await getAuthHeaders();
   const res = await fetch(`${SERVER}/insights/${userId}`, { headers });
   const raw = await res.json().catch(() => ({}));
-  const normalized = normalizeInsightsResponse(raw);
-  console.log("InboxOS insight shapes:", {
-    actionItems: Array.isArray(normalized.actionItems),
-    waitingOn: Array.isArray(normalized.waitingOn),
-    bills: Array.isArray(normalized.bills),
-    followUps: Array.isArray(normalized.followUps),
-    calendar: Array.isArray(normalized.calendar),
-    security: Array.isArray(normalized.security),
-    purchases: Array.isArray(normalized.purchases),
-    briefHighlights: Array.isArray(normalized.brief?.highlights),
-  });
-  return normalized;
+  return normalizeInsightsResponse(raw);
 }
 
 export async function getDailyBrief(userId: string) {
@@ -221,16 +190,10 @@ export async function getDailyBrief(userId: string) {
 }
 
 export async function repairAIData() {
-  const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-  if (sessionError) throw sessionError;
-  if (!session?.access_token) throw new Error("No Supabase session access token is available.");
+  const headers = await getAuthHeaders();
   const response = await fetch(`${SERVER}/ai/repair-data`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${session.access_token}`,
-      "apikey": publicAnonKey,
-    },
+    headers,
     body: JSON.stringify({}),
   });
   const result = await response.json().catch(() => null);
@@ -238,149 +201,90 @@ export async function repairAIData() {
   return result;
 }
 
-export async function archiveEmail(googleProviderToken: string, messageId: string, userId: string) {
-  const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-  if (sessionError) throw sessionError;
-  if (!session?.access_token) throw new Error("No Supabase session access token is available.");
-
+export async function archiveEmail(messageId: string, userId: string) {
+  const headers = await getAuthHeaders();
   const res = await fetch(`${SERVER}/gmail/archive`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${session.access_token}`,
-      "apikey": publicAnonKey,
-    },
-    body: JSON.stringify({ googleProviderToken, message_id: messageId, user_id: userId }),
+    headers,
+    body: JSON.stringify({ message_id: messageId, user_id: userId }),
   });
   return res.json();
 }
 
-export async function markAsRead(googleProviderToken: string, messageId: string, userId: string) {
-  const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-  if (sessionError) throw sessionError;
-  if (!session?.access_token) throw new Error("No Supabase session access token is available.");
-
+export async function markAsRead(messageId: string, userId: string) {
+  const headers = await getAuthHeaders();
   const res = await fetch(`${SERVER}/gmail/mark-read`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${session.access_token}`,
-      "apikey": publicAnonKey,
-    },
-    body: JSON.stringify({ googleProviderToken, message_id: messageId, user_id: userId }),
+    headers,
+    body: JSON.stringify({ message_id: messageId, user_id: userId }),
   });
   return res.json();
 }
 
-export async function searchEmails(googleProviderToken: string, query: string) {
-  const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-  if (sessionError) throw sessionError;
-  if (!session?.access_token) throw new Error("No Supabase session access token is available.");
-
+export async function searchEmails(query: string) {
+  const headers = await getAuthHeaders();
   const res = await fetch(`${SERVER}/gmail/search`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${session.access_token}`,
-      "apikey": publicAnonKey,
-    },
-    body: JSON.stringify({ googleProviderToken, query }),
+    headers,
+    body: JSON.stringify({ query }),
   });
   return res.json();
 }
 
-export async function fetchMessageBody(googleProviderToken: string, messageId: string) {
-  const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-  if (sessionError) throw sessionError;
-  if (!session?.access_token) throw new Error("No Supabase session access token is available.");
-
+export async function fetchMessageBody(messageId: string) {
+  const headers = await getAuthHeaders();
   const res = await fetch(`${SERVER}/gmail/message`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${session.access_token}`,
-      "apikey": publicAnonKey,
-    },
-    body: JSON.stringify({ googleProviderToken, message_id: messageId }),
+    headers,
+    body: JSON.stringify({ message_id: messageId }),
   });
   return res.json();
 }
 
 export async function sendReply(
-  googleProviderToken: string,
   to: string,
   subject: string,
   body: string,
-  threadId?: string
+  threadId?: string,
 ) {
-  const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-  if (sessionError) throw sessionError;
-  if (!session?.access_token) throw new Error("No Supabase session access token is available.");
-
+  const headers = await getAuthHeaders();
   const res = await fetch(`${SERVER}/gmail/send`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${session.access_token}`,
-      "apikey": publicAnonKey,
-    },
-    body: JSON.stringify({ googleProviderToken, to, subject, body, thread_id: threadId }),
+    headers,
+    body: JSON.stringify({ to, subject, body, thread_id: threadId }),
   });
   return res.json();
 }
 
 export async function reclassifyEmails() {
-  const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-  if (sessionError) throw sessionError;
-  if (!session?.access_token) throw new Error("No Supabase session access token is available.");
-
+  const headers = await getAuthHeaders();
   const response = await fetch(`${SERVER}/ai/reclassify`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${session.access_token}`,
-      "apikey": publicAnonKey,
-    },
+    headers,
     body: JSON.stringify({}),
   });
-
   const result = await response.json().catch(() => null);
   if (!response.ok) throw new Error(result?.error || `Reclassify failed with status ${response.status}.`);
   return result;
 }
 
 export async function regenerateInsights() {
-  const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-  if (sessionError) throw sessionError;
-  if (!session?.access_token) throw new Error("No Supabase session access token is available.");
-
+  const headers = await getAuthHeaders();
   const response = await fetch(`${SERVER}/ai/regenerate-insights`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${session.access_token}`,
-      "apikey": publicAnonKey,
-    },
+    headers,
     body: JSON.stringify({}),
   });
-
   const result = await response.json().catch(() => null);
   if (!response.ok) throw new Error(result?.error || `Regenerate insights failed with status ${response.status}.`);
   return result;
 }
 
-export async function aiChat(message: string, userId: string, history: any[]) {
-  const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-  if (sessionError) throw sessionError;
-  if (!session?.access_token) throw new Error("No Supabase session access token is available.");
-
+export async function aiChat(message: string, userId: string, history: { role: string; text: string }[]) {
+  const headers = await getAuthHeaders();
   const res = await fetch(`${SERVER}/ai/chat`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${session.access_token}`,
-      "apikey": publicAnonKey,
-    },
+    headers,
     body: JSON.stringify({ message, user_id: userId, history }),
   });
   return res.json();

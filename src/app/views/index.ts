@@ -1,0 +1,20 @@
+import { lazy } from "react";
+
+export const LoginScreen = lazy(() => import("./LoginScreen").then((m) => ({ default: m.LoginScreen })));
+export const SyncingScreen = lazy(() => import("./SyncingScreen").then((m) => ({ default: m.SyncingScreen })));
+export const Sidebar = lazy(() => import("./Sidebar").then((m) => ({ default: m.Sidebar })));
+export const DashboardView = lazy(() => import("./DashboardView").then((m) => ({ default: m.DashboardView })));
+export const InboxView = lazy(() => import("./InboxView").then((m) => ({ default: m.InboxView })));
+export const AIAssistantView = lazy(() => import("./AIAssistantView").then((m) => ({ default: m.AIAssistantView })));
+export const ActionCenterView = lazy(() => import("./ActionCenterView").then((m) => ({ default: m.ActionCenterView })));
+export const WaitingOnView = lazy(() => import("./WaitingOnView").then((m) => ({ default: m.WaitingOnView })));
+export const FollowUpsView = lazy(() => import("./FollowUpsView").then((m) => ({ default: m.FollowUpsView })));
+export const BillsView = lazy(() => import("./BillsView").then((m) => ({ default: m.BillsView })));
+export const CalendarView = lazy(() => import("./CalendarView").then((m) => ({ default: m.CalendarView })));
+export const PurchasesView = lazy(() => import("./PurchasesView").then((m) => ({ default: m.PurchasesView })));
+export const SecurityView = lazy(() => import("./SecurityView").then((m) => ({ default: m.SecurityView })));
+export const SearchView = lazy(() => import("./SearchView").then((m) => ({ default: m.SearchView })));
+export const AnalyticsView = lazy(() => import("./AnalyticsView").then((m) => ({ default: m.AnalyticsView })));
+export const SettingsView = lazy(() => import("./SettingsView").then((m) => ({ default: m.SettingsView })));
+export const AttachmentsView = lazy(() => import("./AttachmentsView").then((m) => ({ default: m.AttachmentsView })));
+export const AutomationsView = lazy(() => import("./AutomationsView").then((m) => ({ default: m.AutomationsView })));

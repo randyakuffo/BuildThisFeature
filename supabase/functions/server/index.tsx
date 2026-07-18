@@ -2,6 +2,7 @@ import { Hono } from "npm:hono";
 import { logger } from "npm:hono/logger";
 import { createClient } from "npm:@supabase/supabase-js";
 import * as kv from "./kv_store.tsx";
+import { resolveGoogleAccessToken, storeGoogleTokens, clearGoogleTokens } from "./google_tokens.tsx";
 
 const app = new Hono();
 const BASE = "/make-server-6ac207ec";
@@ -74,17 +75,32 @@ const GEMINI_REASONING_MODEL =
   Deno.env.get("GEMINI_REASONING_MODEL") || "gemini-2.5-flash";
 
 // ── CORS ──────────────────────────────────────────────────────────────────────
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
-};
+const allowedOrigins = (Deno.env.get("ALLOWED_ORIGINS") || "")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+function corsHeadersFor(request: Request): Record<string, string> {
+  const origin = request.headers.get("Origin");
+  const allowOrigin =
+    allowedOrigins.length === 0
+      ? "*"
+      : origin && allowedOrigins.includes(origin)
+        ? origin
+        : allowedOrigins[0];
+
+  return {
+    "Access-Control-Allow-Origin": allowOrigin,
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+    "Access-Control-Allow-Methods": "POST, GET, OPTIONS, DELETE",
+  };
+}
 
 app.use("*", logger(console.log));
-app.options("/*", (c) => new Response("ok", { headers: corsHeaders }));
+app.options("/*", (c) => new Response("ok", { headers: corsHeadersFor(c.req.raw) }));
 app.use("/*", async (c, next) => {
   await next();
-  Object.entries(corsHeaders).forEach(([k, v]) => c.res.headers.set(k, v));
+  Object.entries(corsHeadersFor(c.req.raw)).forEach(([k, v]) => c.res.headers.set(k, v));
 });
 
 app.get(`${BASE}/health`, (c) => c.json({ status: "ok" }));
@@ -339,6 +355,19 @@ function parseMessage(msg: any) {
   };
 }
 
+async function fetchGmailMessagesByIds(googleProviderToken: string, messageIds: string[]) {
+  const detailed = await Promise.all(
+    messageIds.slice(0, 20).map(async (id) => {
+      const r = await fetch(
+        `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`,
+        { headers: { Authorization: `Bearer ${googleProviderToken}` } },
+      );
+      return r.ok ? r.json() : null;
+    }),
+  );
+  return detailed.filter(Boolean).map(parseMessage);
+}
+
 async function fetchGmailMessages(googleProviderToken: string, maxResults = MAX_EMAILS_PER_SYNC) {
   const listRes = await fetch(
     `https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=${maxResults}&labelIds=INBOX&includeSpamTrash=false`,
@@ -590,21 +619,50 @@ Return this structure:
 }
 
 // ── Gmail Sync ────────────────────────────────────────────────────────────────
+app.post(`${BASE}/gmail/store-tokens`, async (c) => {
+  try {
+    const { user, error: authError } = await validateSupabaseUser(c.req.header("Authorization"));
+    if (authError || !user) return c.json({ error: authError || "Unauthorized." }, 401);
+
+    const body = await c.req.json();
+    const { googleProviderToken, googleProviderRefreshToken } = body;
+    if (!googleProviderToken) return c.json({ error: "Google provider token is missing." }, 400);
+
+    await storeGoogleTokens(user.id, googleProviderToken, googleProviderRefreshToken ?? null);
+    return c.json({ success: true });
+  } catch (error: any) {
+    return c.json({ error: error?.message || "Failed to store Google tokens." }, 500);
+  }
+});
+
+app.delete(`${BASE}/gmail/tokens`, async (c) => {
+  try {
+    const { user, error: authError } = await validateSupabaseUser(c.req.header("Authorization"));
+    if (authError || !user) return c.json({ error: authError || "Unauthorized." }, 401);
+    await clearGoogleTokens(user.id);
+    return c.json({ success: true });
+  } catch (error: any) {
+    return c.json({ error: error?.message || "Failed to clear Google tokens." }, 500);
+  }
+});
+
 app.post(`${BASE}/gmail/sync`, async (c) => {
   try {
     const { user, error: authError } = await validateSupabaseUser(c.req.header("Authorization"));
     if (authError || !user) return c.json({ error: authError || "Unauthorized." }, 401);
 
     const body = await c.req.json();
-    const { userId, googleProviderToken } = body;
+    const { userId, googleProviderToken, googleProviderRefreshToken } = body;
 
     console.log("InboxOS Gmail handler:", { authenticatedUser: Boolean(user), hasGoogleProviderToken: Boolean(googleProviderToken) });
 
-    if (!googleProviderToken) return c.json({ error: "Google provider token is missing." }, 400);
     if (userId && userId !== user.id) return c.json({ error: "User ID does not match authenticated session." }, 403);
 
     const trustedUserId = user.id;
-    const emails = await fetchGmailMessages(googleProviderToken, MAX_EMAILS_PER_SYNC);
+    const googleToken = await resolveGoogleAccessToken(trustedUserId, { googleProviderToken, googleProviderRefreshToken });
+    if (!googleToken) return c.json({ error: "Google provider token is missing or expired." }, 400);
+
+    const emails = await fetchGmailMessages(googleToken, MAX_EMAILS_PER_SYNC);
 
     // Merge with cached emails to preserve ai_version on unchanged messages
     const cached: any[] = (await kv.get(`emails:${trustedUserId}`)) || [];
@@ -759,7 +817,9 @@ app.get(`${BASE}/emails/:userId`, async (c) => {
 app.post(`${BASE}/gmail/message`, async (c) => {
   const { user, error: authError } = await validateSupabaseUser(c.req.header("Authorization"));
   if (authError || !user) return c.json({ error: authError || "Unauthorized." }, 401);
-  const { googleProviderToken, message_id } = await c.req.json();
+  const body = await c.req.json();
+  const { message_id } = body;
+  const googleProviderToken = await resolveGoogleAccessToken(user.id, body);
   if (!googleProviderToken) return c.json({ error: "Google provider token is missing." }, 400);
   const res = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${message_id}?format=full`, {
     headers: { Authorization: `Bearer ${googleProviderToken}` },
@@ -772,7 +832,9 @@ app.post(`${BASE}/gmail/message`, async (c) => {
 app.post(`${BASE}/gmail/archive`, async (c) => {
   const { user, error: authError } = await validateSupabaseUser(c.req.header("Authorization"));
   if (authError || !user) return c.json({ error: authError || "Unauthorized." }, 401);
-  const { googleProviderToken, message_id } = await c.req.json();
+  const body = await c.req.json();
+  const { message_id } = body;
+  const googleProviderToken = await resolveGoogleAccessToken(user.id, body);
   if (!googleProviderToken) return c.json({ error: "Google provider token is missing." }, 400);
   await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${message_id}/modify`, {
     method: "POST",
@@ -787,7 +849,9 @@ app.post(`${BASE}/gmail/archive`, async (c) => {
 app.post(`${BASE}/gmail/mark-read`, async (c) => {
   const { user, error: authError } = await validateSupabaseUser(c.req.header("Authorization"));
   if (authError || !user) return c.json({ error: authError || "Unauthorized." }, 401);
-  const { googleProviderToken, message_id } = await c.req.json();
+  const body = await c.req.json();
+  const { message_id } = body;
+  const googleProviderToken = await resolveGoogleAccessToken(user.id, body);
   if (!googleProviderToken) return c.json({ error: "Google provider token is missing." }, 400);
   await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${message_id}/modify`, {
     method: "POST",
@@ -802,7 +866,9 @@ app.post(`${BASE}/gmail/mark-read`, async (c) => {
 app.post(`${BASE}/gmail/search`, async (c) => {
   const { user, error: authError } = await validateSupabaseUser(c.req.header("Authorization"));
   if (authError || !user) return c.json({ error: authError || "Unauthorized." }, 401);
-  const { googleProviderToken, query } = await c.req.json();
+  const body = await c.req.json();
+  const { query } = body;
+  const googleProviderToken = await resolveGoogleAccessToken(user.id, body);
   if (!googleProviderToken) return c.json({ error: "Google provider token is missing." }, 400);
   const res = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=20&q=${encodeURIComponent(query)}`, {
     headers: { Authorization: `Bearer ${googleProviderToken}` },
@@ -810,16 +876,19 @@ app.post(`${BASE}/gmail/search`, async (c) => {
   if (!res.ok) return c.json({ emails: [] });
   const { messages = [] } = await res.json();
   if (!messages.length) return c.json({ emails: [] });
-  const emails = await fetchGmailMessages(googleProviderToken, messages.length);
+  const messageIds = messages.map((m: { id: string }) => m.id);
+  const emails = await fetchGmailMessagesByIds(googleProviderToken, messageIds);
   return c.json({ emails });
 });
 
 app.post(`${BASE}/gmail/send`, async (c) => {
   const { user, error: authError } = await validateSupabaseUser(c.req.header("Authorization"));
   if (authError || !user) return c.json({ error: authError || "Unauthorized." }, 401);
-  const { googleProviderToken, to, subject, body, thread_id } = await c.req.json();
+  const body = await c.req.json();
+  const { to, subject, body: emailBody, thread_id } = body;
+  const googleProviderToken = await resolveGoogleAccessToken(user.id, body);
   if (!googleProviderToken) return c.json({ error: "Google provider token is missing." }, 400);
-  const raw = btoa([`To: ${to}`, `Subject: ${subject}`, `Content-Type: text/plain; charset=utf-8`, ``, body].join("\r\n"))
+  const raw = btoa([`To: ${to}`, `Subject: ${subject}`, `Content-Type: text/plain; charset=utf-8`, ``, emailBody].join("\r\n"))
     .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
   const payload: any = { raw };
   if (thread_id) payload.threadId = thread_id;
