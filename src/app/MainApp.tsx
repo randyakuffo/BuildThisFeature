@@ -14,7 +14,7 @@ import {
 import { normalizeEmail } from "../lib/normalize";
 import type { View, AppState, Stats, DailyBrief, AIProcessingStatus, Insights } from "./types";
 import { Spinner } from "./components/primitives";
-import { EMPTY_INSIGHTS } from "./lib/helpers";
+import { EMPTY_INSIGHTS, processLoadedInsights } from "./lib/helpers";
 import * as Views from "./views";
 
 function sessionTokens(session: { provider_token?: string | null; provider_refresh_token?: string | null } | null): GoogleSessionTokens | undefined {
@@ -112,20 +112,11 @@ export function MainApp() {
 
       const fresh = await getCachedEmails(userId);
 
-      setEmails(Array.isArray(fresh.emails) ? fresh.emails.map(normalizeEmail) : []);
+      const loaded = processLoadedInsights(fresh.emails, await getInsights(userId));
+      setEmails(loaded.emails);
       setStats(fresh.stats || { total: 0, unread: 0, important: 0, needsReply: 0, byCategory: {} });
       setLastSync(fresh.lastSync || new Date().toISOString());
-
-      const newInsights = await getInsights(userId);
-      setInsights({
-        actionItems: Array.isArray(newInsights?.actionItems) ? newInsights.actionItems : [],
-        waitingOn: Array.isArray(newInsights?.waitingOn) ? newInsights.waitingOn : [],
-        bills: Array.isArray(newInsights?.bills) ? newInsights.bills : [],
-        followUps: Array.isArray(newInsights?.followUps) ? newInsights.followUps : [],
-        calendar: Array.isArray(newInsights?.calendar) ? newInsights.calendar : [],
-        security: Array.isArray(newInsights?.security) ? newInsights.security : [],
-        purchases: Array.isArray(newInsights?.purchases) ? newInsights.purchases : [],
-      });
+      setInsights(loaded.insights);
 
       void loadBrief(userId);
       setAppState("ready");
@@ -143,21 +134,12 @@ export function MainApp() {
     try {
       const cached = await getCachedEmails(userId);
       if (cached.emails?.length > 0) {
-        setEmails(Array.isArray(cached.emails) ? cached.emails.map(normalizeEmail) : []);
+        const loaded = processLoadedInsights(cached.emails, await getInsights(userId));
+        setEmails(loaded.emails);
         setStats(cached.stats || {});
         setLastSync(cached.lastSync);
+        setInsights(loaded.insights);
         setAppState("ready");
-
-        const ins = await getInsights(userId);
-        setInsights({
-          actionItems: Array.isArray(ins?.actionItems) ? ins.actionItems : [],
-          waitingOn: Array.isArray(ins?.waitingOn) ? ins.waitingOn : [],
-          bills: Array.isArray(ins?.bills) ? ins.bills : [],
-          followUps: Array.isArray(ins?.followUps) ? ins.followUps : [],
-          calendar: Array.isArray(ins?.calendar) ? ins.calendar : [],
-          security: Array.isArray(ins?.security) ? ins.security : [],
-          purchases: Array.isArray(ins?.purchases) ? ins.purchases : [],
-        });
 
         void loadBrief(userId);
 
@@ -261,18 +243,10 @@ export function MainApp() {
         setAiStatus((s) => ({ ...s, insightsStatus: result.insights.status, insightsProvider: result.insights.provider }));
       }
       const fresh = await getCachedEmails(user.id);
-      setEmails(Array.isArray(fresh.emails) ? fresh.emails.map(normalizeEmail) : []);
+      const loaded = processLoadedInsights(fresh.emails, await getInsights(user.id));
+      setEmails(loaded.emails);
       setStats(fresh.stats || { total: 0, unread: 0, important: 0, needsReply: 0, byCategory: {} });
-      const newInsights = await getInsights(user.id);
-      setInsights({
-        actionItems: Array.isArray(newInsights?.actionItems) ? newInsights.actionItems : [],
-        waitingOn: Array.isArray(newInsights?.waitingOn) ? newInsights.waitingOn : [],
-        bills: Array.isArray(newInsights?.bills) ? newInsights.bills : [],
-        followUps: Array.isArray(newInsights?.followUps) ? newInsights.followUps : [],
-        calendar: Array.isArray(newInsights?.calendar) ? newInsights.calendar : [],
-        security: Array.isArray(newInsights?.security) ? newInsights.security : [],
-        purchases: Array.isArray(newInsights?.purchases) ? newInsights.purchases : [],
-      });
+      setInsights(loaded.insights);
     } catch (e) {
       console.error("InboxOS reclassify failed:", e);
       setAiStatus((s) => ({ ...s, classificationStatus: "failed" }));
@@ -425,17 +399,9 @@ export function MainApp() {
               onRepairData={async () => {
                 const r = await repairAIData();
                 const fresh = await getCachedEmails(user!.id);
-                setEmails(Array.isArray(fresh.emails) ? fresh.emails.map(normalizeEmail) : []);
-                const ins = await getInsights(user!.id);
-                setInsights({
-                  actionItems: Array.isArray(ins?.actionItems) ? ins.actionItems : [],
-                  waitingOn: Array.isArray(ins?.waitingOn) ? ins.waitingOn : [],
-                  bills: Array.isArray(ins?.bills) ? ins.bills : [],
-                  calendar: Array.isArray(ins?.calendar) ? ins.calendar : [],
-                  security: Array.isArray(ins?.security) ? ins.security : [],
-                  followUps: Array.isArray(ins?.followUps) ? ins.followUps : [],
-                  purchases: Array.isArray(ins?.purchases) ? ins.purchases : [],
-                });
+                const loaded = processLoadedInsights(fresh.emails, await getInsights(user!.id));
+                setEmails(loaded.emails);
+                setInsights(loaded.insights);
                 void loadBrief(user!.id);
                 return r;
               }}

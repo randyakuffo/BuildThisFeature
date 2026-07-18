@@ -1,5 +1,7 @@
 import type { GmailEmail, Insights } from "../types";
 import type { Stats } from "../types";
+import { normalizeEmail } from "../../lib/normalize";
+import { applyHeuristicClassificationBatch, enrichInsights } from "../../lib/heuristics";
 
 export const EMPTY_INSIGHTS: Insights = {
   actionItems: [],
@@ -10,6 +12,32 @@ export const EMPTY_INSIGHTS: Insights = {
   security: [],
   purchases: [],
 };
+
+export function processLoadedEmailData(rawEmails: unknown[], rawInsights: Insights) {
+  const emails = applyHeuristicClassificationBatch(
+    (Array.isArray(rawEmails) ? rawEmails : []).map(normalizeEmail),
+  );
+  return {
+    emails,
+    insights: enrichInsights(emails, rawInsights),
+  };
+}
+
+function normalizeInsightBuckets(raw: Partial<Insights> | null | undefined): Insights {
+  return {
+    actionItems: Array.isArray(raw?.actionItems) ? raw.actionItems : [],
+    waitingOn: Array.isArray(raw?.waitingOn) ? raw.waitingOn : [],
+    bills: Array.isArray(raw?.bills) ? raw.bills : [],
+    followUps: Array.isArray(raw?.followUps) ? raw.followUps : [],
+    calendar: Array.isArray(raw?.calendar) ? raw.calendar : [],
+    security: Array.isArray(raw?.security) ? raw.security : [],
+    purchases: Array.isArray(raw?.purchases) ? raw.purchases : [],
+  };
+}
+
+export function processLoadedInsights(rawEmails: unknown[], rawInsights: unknown) {
+  return processLoadedEmailData(rawEmails, normalizeInsightBuckets(rawInsights as Insights));
+}
 
 export const colorMap: Record<string, { bg: string; icon: string; stroke: string }> = {
   indigo: { bg: "bg-indigo-50 dark:bg-indigo-950/40", icon: "text-indigo-600 dark:text-indigo-400", stroke: "#6366F1" },

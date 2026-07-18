@@ -3,6 +3,12 @@ import { logger } from "npm:hono/logger";
 import { createClient } from "npm:@supabase/supabase-js";
 import * as kv from "./kv_store.tsx";
 import { resolveGoogleAccessToken, storeGoogleTokens, clearGoogleTokens } from "./google_tokens.tsx";
+import {
+  applyHeuristicClassifications,
+  heuristicClassifyEmail,
+  persistEnrichedInsights,
+  persistHeuristicInsights,
+} from "./heuristics.tsx";
 
 const app = new Hono();
 const BASE = "/make-server-6ac207ec";
@@ -489,13 +495,13 @@ ${JSON.stringify(emailList)}`;
       // Any ids in batch not returned by AI get fallback
       for (const e of toClassify) {
         if (!classMap.has(e.id)) {
-          classMap.set(e.id, normalizeClassification({}, e));
+          classMap.set(e.id, normalizeClassification(heuristicClassifyEmail(e), e));
           fallbackCount++;
         }
       }
     } else {
       for (const e of toClassify) {
-        classMap.set(e.id, normalizeClassification({}, e));
+        classMap.set(e.id, normalizeClassification(heuristicClassifyEmail(e), e));
         fallbackCount++;
       }
     }
@@ -575,45 +581,26 @@ Return this structure:
   const now = new Date().toISOString();
 
   if (!result.success || !result.data) {
-    // Store empty insights with metadata
-    await kv.mset(
-      [`insights:${userId}:action_items`, `insights:${userId}:waiting_on`, `insights:${userId}:bills`,
-       `insights:${userId}:follow_ups`, `insights:${userId}:calendar`, `insights:${userId}:security`,
-       `insights:${userId}:purchases`, `insights:${userId}:brief`, `insights:${userId}:meta`],
-      [[], [], [], [], [], [], [], [],
-       { analysisCompletedAt: now, insights_provider: "fallback", insights_model: "none", insights_generated_at: now, insights_version: "v2" }]
-    );
-    return { provider: "fallback", model: "none", success: false };
+    await persistHeuristicInsights(emails, userId);
+    return { provider: "fallback", model: "rules", success: true };
   }
 
   // Always normalize before saving — never store raw provider output directly
   const d = normalizeInsights(result.data);
-
-  console.log("InboxOS insights generated:", {
-    actionItems: d.actionItems.length,
-    waitingOn: d.waitingOn.length,
-    bills: d.bills.length,
-    followUps: d.followUps.length,
+  const enriched = await persistEnrichedInsights(emails, userId, d, {
+    analysisCompletedAt: now,
+    insights_provider: result.provider,
+    insights_model: result.model,
+    insights_generated_at: now,
+    insights_version: "v2",
   });
 
-  // Store brief as { summary, highlights } object — consistent shape
-  await kv.mset(
-    [`insights:${userId}:action_items`, `insights:${userId}:waiting_on`, `insights:${userId}:bills`,
-     `insights:${userId}:follow_ups`, `insights:${userId}:calendar`, `insights:${userId}:security`,
-     `insights:${userId}:purchases`, `insights:${userId}:brief`, `insights:${userId}:meta`],
-    [
-      d.actionItems, d.waitingOn, d.bills,
-      d.followUps, d.calendar, d.security,
-      d.purchases, d.brief,
-      {
-        analysisCompletedAt: now,
-        insights_provider: result.provider,
-        insights_model: result.model,
-        insights_generated_at: now,
-        insights_version: "v2",
-      },
-    ]
-  );
+  console.log("InboxOS insights generated:", {
+    actionItems: enriched.actionItems.length,
+    waitingOn: enriched.waitingOn.length,
+    bills: enriched.bills.length,
+    followUps: enriched.followUps.length,
+  });
 
   return { provider: result.provider, model: result.model, success: true };
 }
@@ -700,6 +687,13 @@ app.post(`${BASE}/gmail/sync`, async (c) => {
       if (provider === "fallback") classificationStatus = fc === mergedEmails.length ? "failed" : "partial";
       else if (fc === 0) classificationStatus = "completed";
       else classificationStatus = "partial";
+    } else {
+      classifiedEmails = applyHeuristicClassifications(mergedEmails);
+      classificationStatus = "fallback";
+      classificationProvider = "fallback";
+      classificationModel = "rules";
+      classifiedCount = classifiedEmails.length;
+      fallbackCount = classifiedEmails.length;
     }
 
     const stats = {
@@ -724,6 +718,10 @@ app.post(`${BASE}/gmail/sync`, async (c) => {
       const insResult = await generateInsights(classifiedEmails, trustedUserId);
       insightsProvider = insResult.provider;
       insightsStatus = insResult.success ? "completed" : "failed";
+    } else {
+      await persistHeuristicInsights(classifiedEmails, trustedUserId);
+      insightsProvider = "fallback";
+      insightsStatus = "completed";
     }
 
     return c.json({
