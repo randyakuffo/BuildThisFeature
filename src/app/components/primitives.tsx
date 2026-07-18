@@ -103,8 +103,8 @@ export function AIStatusBadge({
     label = "AI partial sort";
     color = "text-amber-400";
   } else if (classificationStatus === "failed" || classificationStatus === "fallback") {
-    label = "AI unavailable · basic sort";
-    color = "text-slate-500";
+    label = "Rule-based sort";
+    color = "text-sky-400";
   }
 
   return (
